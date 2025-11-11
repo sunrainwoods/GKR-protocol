@@ -9,15 +9,15 @@ namespace test1
 {
     internal class Program
     {
-        private static int BinaryToInt(int[] bits)
-        {
-            int result = 0;
-            for (int i = 0; i < bits.Length; i++)
-            {
-                result |= bits[i] << i;
-            }
-            return result;
-        }
+        //private static int BinaryToInt(int[] bits)
+        //{
+        //    int result = 0;
+        //    for (int i = 0; i < bits.Length; i++)
+        //    {
+        //        result |= bits[i] << i;
+        //    }
+        //    return result;
+        //}
         private static int[] IntToBinary(int n, int len)
         {
             int[] bits = new int[len];
@@ -113,19 +113,19 @@ namespace test1
             };
         }
 
-
+        
         class Prover
         {
             private Func<int[], int[], int[], int>[] funs;
             private Func<int[], int>[] Vs;
-            private int layer;
+            //private int layer;
             private int[] gateNum;
             private int[] bitsLen;
             private int mod;
 
             public Prover(int layer, int[] gateNum, int[] bitsLen, int mod)
             {
-                this.layer = layer;
+                //this.layer = layer;
                 this.gateNum = gateNum;
                 this.bitsLen = bitsLen;
                 funs = new Func<int[], int[], int[], int>[layer];
