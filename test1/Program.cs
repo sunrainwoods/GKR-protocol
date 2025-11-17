@@ -25,7 +25,7 @@ namespace test1
             {
                 bits[i] = (n >> i) & 1;
             }
-            return bits;
+            return bits.Reverse().ToArray();
         }
 
         private static int Mod(int a, int mod)
@@ -62,12 +62,12 @@ namespace test1
                 int s = 0;
                 if (layer == 2)
                 {
-                    s += (1-a[0]) * (1-a[1]) * (1-b[0]) * (1-b[1]) * (1-b[2]) * (1-c[0]) * (1-c[1]) * c[2];
+                    s += (1 - a[0]) * (1 - a[1]) * (1 - b[0]) * (1 - b[1]) * (1 - b[2]) * (1 - c[0]) * (1 - c[1]) * c[2];
                     s += a[0] * a[1] * b[0] * b[1] * (1 - b[2]) * c[0] * c[1] * c[2];
                 }
                 else if (layer == 1)
                 {
-                    s += a[0] * b[0] * (1-b[1]) * c[0] * c[1];
+                    s += a[0] * b[0] * (1 - b[1]) * c[0] * c[1];
                 }
                 else if (layer == 0)
                 {
@@ -99,12 +99,12 @@ namespace test1
                 int s = 0;
                 if (layer == 2)
                 {
-                    s += (1-a[0]) * a[1] * (1-b[0]) * b[1] * (1-b[2]) * (1-c[0]) * c[1] * c[2];
-                    s += a[0] * (1-a[1]) * b[0] * (1-b[1]) * (1-b[2]) * c[0] * (1-c[1]) * c[2];
+                    s += (1 - a[0]) * a[1] * (1 - b[0]) * b[1] * (1 - b[2]) * (1 - c[0]) * c[1] * c[2];
+                    s += a[0] * (1 - a[1]) * b[0] * (1 - b[1]) * (1 - b[2]) * c[0] * (1 - c[1]) * c[2];
                 }
                 else if (layer == 1)
                 {
-                    s += (1-a[0]) * (1-b[0]) * (1-b[1]) * (1-c[0]) * c[1];
+                    s += (1 - a[0]) * (1 - b[0]) * (1 - b[1]) * (1 - c[0]) * c[1];
                 }
                 else if (layer == 0)
                 {
@@ -113,30 +113,30 @@ namespace test1
             };
         }
 
-        
+
         class Prover
         {
             private Func<int[], int[], int[], int>[] funs;
             private Func<int[], int>[] Vs;
-            //private int layer;
+            private int layer;
             private int[] gateNum;
             private int[] bitsLen;
             private int mod;
 
             public Prover(int layer, int[] gateNum, int[] bitsLen, int mod)
             {
-                //this.layer = layer;
+                this.layer = layer;
                 this.gateNum = gateNum;
                 this.bitsLen = bitsLen;
+                this.mod = mod;
                 funs = new Func<int[], int[], int[], int>[layer];
                 Vs = new Func<int[], int>[layer + 1];
                 for (int i = 0; i < layer; i++)
                 {
                     funs[i] = make_f(i);
-                    Vs[i] = make_V((int)Math.Pow(2, i), i);
+                    Vs[i] = make_V(gateNum[i], i);
                 }
-                Vs[layer] = make_V((int)Math.Pow(2, layer), layer);
-                this.mod = mod;
+                Vs[layer] = make_V(gateNum[layer], layer);
             }
 
             public int W(int now_lawer, int index)
@@ -164,7 +164,7 @@ namespace test1
                 return -1;
             }
 
-            public Func<int[], int> make_V(int gateNum, int layer)
+            public Func<int[], int> make_V(int gateNum, int layer)          //邏輯要改
             {
                 return (int[] z) =>
                 {
@@ -204,10 +204,10 @@ namespace test1
                 return (int[] a, int[] b, int[] c) =>
                 {
                     int s = 0;
-                    var nextLayerV = make_V(gateNum[layer+1], layer + 1);
+                    var nextLayerV = make_V(gateNum[layer + 1], layer + 1);
                     s += AddPoly(layer)(a, b, c) * (nextLayerV(b) + nextLayerV(c));
                     s += MulPoly(layer)(a, b, c) * (nextLayerV(b) * nextLayerV(c));
-                    return s;
+                    return Mod(s, mod);
                 };
             }
 
@@ -217,10 +217,10 @@ namespace test1
                 {
                     int s = 0;
                     var g = funs[nowLayer];
-                    int[] parameter = new int[ bitsLen[nowLayer] + bitsLen[nowLayer+1] + bitsLen[nowLayer+1] ];
+                    int[] parameter = new int[bitsLen[nowLayer] + bitsLen[nowLayer + 1] + bitsLen[nowLayer + 1]];
                     for (int i = 0; i < fixed_var.Length; i++) parameter[i] = fixed_var[i];
                     parameter[fixed_var.Length] = z;
-                    for (int i = 0; i < Math.Pow(2, parameter.Length - fixed_var.Length -1); i++)
+                    for (int i = 0; i < Math.Pow(2, parameter.Length - fixed_var.Length - 1); i++)
                     {
                         int[] restBits = IntToBinary(i, parameter.Length - fixed_var.Length - 1);
                         for (int j = 0; j < restBits.Length; j++)
@@ -232,8 +232,28 @@ namespace test1
                             parameter.Skip(bitsLen[nowLayer]).Take(bitsLen[nowLayer + 1]).ToArray(),
                             parameter.Skip(bitsLen[nowLayer] + bitsLen[nowLayer + 1]).Take(bitsLen[nowLayer + 1]).ToArray()
                             );
+
+
+                        //if (nowLayer == 1) Console.WriteLine($"z: {z} ,paramter: " + string.Join(", ", parameter));
+                        //if (nowLayer == 1) Console.WriteLine("s: " + s);
+
                     }
                     return Mod(s, mod);
+                };
+            }
+
+            public Func<int, int[]> make_l(int layer, int[] fixed_var)
+            {
+                return (int z) =>
+                {
+                    int[] b = fixed_var.Skip(bitsLen[layer]).Take(bitsLen[layer + 1]).ToArray();
+                    int[] c = fixed_var.Skip(bitsLen[layer] + bitsLen[layer + 1]).Take(bitsLen[layer + 1]).ToArray();
+                    int[] l = new int[bitsLen[layer + 1]];
+                    for (int i = 0; i < l.Length; i++)
+                    {
+                        l[i] = Mod(b[i] * (1 - z) + c[i] * z, mod);
+                    }
+                    return l;
                 };
             }
 
@@ -242,15 +262,9 @@ namespace test1
                 return (int z) =>
                 {
                     int s = 0;
-                    int[] b = fixed_var.Skip(bitsLen[layer]).Take(bitsLen[layer + 1]).ToArray();
-                    int[] c = fixed_var.Skip(bitsLen[layer] + bitsLen[layer + 1]).Take(bitsLen[layer + 1]).ToArray();
-                    int[] l = new int[bitsLen[layer+1]];
-                    for (int i = 0; i < l.Length; i++)
-                    {
-                        l[i] = b[i] * (1-z) + c[i] * z;
-                    }
+                    var l = make_l(layer, fixed_var);
                     var V_next = Vs[layer + 1];
-                    s = V_next(l);
+                    s = V_next(l(z));
                     return Mod(s, mod);
                 };
             }
@@ -259,10 +273,9 @@ namespace test1
             {
                 return (int z) =>
                 {
-                    return Vs[0](new int[] { z });
+                    return Vs[0]( new int[] { z } );
                 };
             }
-
         }
 
         class Verifier
@@ -280,11 +293,12 @@ namespace test1
                 return rand.Next(mod);
             }
 
+
         }
 
         private static void GKR_Protocol()
         {
-            int mod = 23;
+            int mod = 83;                                                               //初始化電路
             int layer = 3;
             int[] gateNum = { 1, 2, 4, 8 };
             int[] bitsLen = new int[gateNum.Length];
@@ -296,32 +310,49 @@ namespace test1
                     continue;
                 }
                 bitsLen[i] = (int)Math.Ceiling(Math.Log(gateNum[i], 2));
+
+                Console.WriteLine($"bitLen {i}:" + bitsLen[i]);
+
             }
-            Prover prover = new Prover(layer, gateNum, bitsLen, mod);
+
+            Prover prover = new Prover(layer, gateNum, bitsLen, mod);                   //建立P,V
             Verifier verifier = new Verifier(mod);
 
-            int[] fixed_var = new int[1];
+            //建立需要的變數
+            int[] fixed_var = new int[bitsLen[0]];
+            for (int i = 0; i < fixed_var.Length; i++) fixed_var[i] = verifier.pickRandom();
+            int random_var;
+            //Func<int, int> answer_poly = prover.claimed_D();
             var claimed_poly = prover.claimed_D();
-            int claimed_answer = claimed_poly(0);
             int claimed;
             int midterm;
-            Console.WriteLine("P: Claimed answer: " + claimed_answer);
+            Func<int, int[]> l_poly;
+
+
+
+            Console.WriteLine("answer: " + prover.claimed_D()(0));
+            //for (int i = 0; i < fixed_var.Length; i++) Console.WriteLine("P: Claimed answer_poly: " + prover.claimed_D()(IntToBinary(i, fixed_var.Length)));       //P 宣稱答案
+            
+            // 第一輪開始可以是多個 fixed_var 填入 claimed_poly 計算，或許要用 l()
+            claimed = claimed_poly(fixed_var[0]);
+
 
             for (int now_layer = 0; now_layer < layer; now_layer++)
             {
-                fixed_var[0] = verifier.pickRandom();
-                Console.WriteLine($"V: Fixed var for layer {now_layer}: " + fixed_var[0]);
-                claimed = claimed_poly(fixed_var[0]);
-                Console.WriteLine($"P: claimed_poly{now_layer}({fixed_var[0]}) = " + claimed);
+                //fixed_var[0] = verifier.pickRandom();
+                //Console.WriteLine($"V: Fixed var for layer {now_layer}: " + fixed_var[0]);
+
+                
+                //Console.WriteLine($"P: claimed_poly{now_layer}({fixed_var[0]}) = " + claimed);
                 Console.WriteLine(" sum check ");
-                for (int i = 0; i < bitsLen[now_layer] + bitsLen[now_layer + 1] * 2 - 1; i++)
+                for (int i = 0; i < bitsLen[now_layer + 1] * 2 ; i++)           //sum check
                 {
                     var G = prover.make_G(fixed_var, now_layer);
                     Console.WriteLine($"P: send G{i}");
                     Console.WriteLine($"V: Verifying G{i}(0) + G{i}(1) ?= claimed");
 
-                    Console.WriteLine($" G(0): {G(0)}, G(1): {G(1)} ");
-                    
+                    //Console.WriteLine($" G(0): {G(0)}, G(1): {G(1)} ");
+
                     midterm = Mod(G(0) + G(1), mod);
                     if (midterm != claimed) { Console.WriteLine("V: sum check failed"); return; }
                     int s = verifier.pickRandom();
@@ -330,7 +361,8 @@ namespace test1
                     fixed_var[fixed_var.Length - 1] = s;
                     claimed = G(s);
                     Console.WriteLine($"P: claimed G{i}(s{i}) = {claimed}");
-                    if (i == bitsLen[now_layer] + bitsLen[now_layer + 1] * 2 - 2)
+
+                    if (i == bitsLen[now_layer + 1] * 2 - 1)
                     {
                         claimed_poly = prover.make_q(now_layer, fixed_var);
                         Console.WriteLine("P: send claimed_poly" + (now_layer + 1));
@@ -338,13 +370,26 @@ namespace test1
                         int[] b = fixed_var.Skip(bitsLen[now_layer]).Take(bitsLen[now_layer + 1]).ToArray();
                         int[] c = fixed_var.Skip(bitsLen[now_layer] + bitsLen[now_layer + 1]).Take(bitsLen[now_layer + 1]).ToArray();
                         Console.WriteLine("V: sum check final check ");
-
-                        Console.WriteLine(Mod((AddPoly(now_layer)(a, b, c) * (claimed_poly(0) + claimed_poly(1))) + (MulPoly(now_layer)(a, b, c) * (claimed_poly(0) * claimed_poly(1))), mod));
-                        
                         midterm = Mod((AddPoly(now_layer)(a, b, c) * (claimed_poly(0) + claimed_poly(1))) + (MulPoly(now_layer)(a, b, c) * (claimed_poly(0) * claimed_poly(1))), mod);
+
+                        //Console.WriteLine("midterm: " + midterm);
+
                         if (claimed != midterm) { Console.WriteLine("V: final check failed"); return; }
-                        Array.Resize(ref fixed_var, 1);
+                        //Array.Resize(ref fixed_var, 1);
                         Console.WriteLine(" sum check passed ");
+
+                        random_var = verifier.pickRandom();
+                        claimed = claimed_poly(random_var);
+                        l_poly  = prover.make_l(now_layer, fixed_var);
+                        Array.Resize(ref fixed_var, bitsLen[now_layer + 1]);
+                        for (int j = 0; j < fixed_var.Length; j++)
+                        {
+                            fixed_var[j] = l_poly(random_var)[j];
+
+                            Console.WriteLine(now_layer);
+                            Console.WriteLine($" fixed_var {j}: " + fixed_var[j]);
+
+                        }
                     }
                 }
             }
