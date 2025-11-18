@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO.Ports;
 using System.Linq;
+using System.Net.NetworkInformation;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -112,6 +113,53 @@ namespace test1
                 return s;
             };
         }
+
+        class Node
+        {
+            public int? value;
+            public int sign;        // 0: + , 1: -
+            public Node left;
+            public Node right;
+
+            public Node()
+            {
+                this.value = null;
+                this.left = null;
+                this.right = null;
+            }
+
+            public Node(int value)          // input node
+            {
+                this.value = value;
+                this.left = null;
+                this.right = null;
+            }
+
+            public void set_sign(int sign)
+            {
+                this.sign = sign;
+            }
+
+            public void set_left(Node left)
+            {
+                this.left = left;
+            }
+
+            public void set_right(Node right)
+            {
+                this.right = right;
+            }
+
+            public void calculate_value()
+            {
+                if (left == null && right == null) return;
+                if (left.value == null) left.calculate_value();
+                if (right.value == null) right.calculate_value();
+                if (sign == 0) value = left.value + right.value;
+                else if (sign == 1) value = left.value * right.value;
+            }
+        }
+
 
 
         class Prover
@@ -298,22 +346,164 @@ namespace test1
 
         private static void GKR_Protocol()
         {
-            int mod = 83;                                                               //初始化電路
-            int layer = 3;
-            int[] gateNum = { 1, 2, 4, 8 };
-            int[] bitsLen = new int[gateNum.Length];
-            for (int i = 0; i < gateNum.Length; i++)
+            int mod;
+            int layer;
+            Node[][] circuit;
+            int[] gateNum;
+            int[] bitsLen;
+
+
+            while (true)                                             // mod
             {
+                Console.Write("mod = ");
+                if (!int.TryParse(Console.ReadLine(), out int n))
+                {
+                    Console.WriteLine("Please enter a valid input.");
+                }
+                else
+                {
+                    mod = n;
+                    break;
+                }
+            }
+
+
+            while (true)                                              // layer
+            {
+                Console.Write("layer = ");
+                if (!int.TryParse(Console.ReadLine(), out int n))
+                {
+                    Console.WriteLine("Please enter a valid input.");
+                }
+                else
+                {
+                    layer = n;
+                    circuit = new Node[layer][];
+                    break;
+                }
+            }
+
+            for (int i = 0; i < layer; i++)                                 // gate
+            {
+                while (true)
+                {
+                    if (i == 0) Console.Write("(output) ");
+                    else if (i == layer - 1) Console.Write("(input) ");
+                    Console.Write($"layer {i} = ");
+                    string n = Console.ReadLine().Trim();
+                    if (i == layer-1)
+                    {
+                        string[] parts = n.Split(',');
+                        if (parts == null)
+                        {
+                            Console.WriteLine("Please enter a valid input.");
+                            continue;
+                        }
+                        if (parts.All(p => int.TryParse(p, out _)))
+                        {
+                            for (int j = 0; j < parts.Length; j++)
+                            {
+                                circuit[i][j] = new Node(int.Parse(parts[j]));
+                            }
+                            break;
+                        }
+                    }
+                    else if (n.Distinct().OrderBy(x => x).SequenceEqual(new[] { '0', '1' }))
+                    {
+                        circuit[i] = new Node[n.Length];
+                        for (int j = 0; j < n.Length; j++)
+                        {
+                            circuit[i][j] = new Node();
+                            if (n[j] == '0') circuit[i][j].set_sign(0);
+                            else if (n[j] == '1') circuit[i][j].set_sign(1);
+                        }
+                        break;
+                    }
+                    Console.WriteLine("Please enter a valid input.");
+                }
+            }
+
+            for (int i = 0; i < layer-1; i++)                           // connect layers
+            {
+                while (true)
+                {
+                    bool wrong = false;
+                    Console.Write($"Connect layer {i} to layer {i + 1} : ");
+                    string n = Console.ReadLine().Trim();
+                    string[] parts = n.Split('@');
+                    string[][] nodes = new string[parts.Length][];
+                    for (int j = 0; j < parts.Length; j++) nodes[j] = parts[j].Split(',');
+                    for (int j = 0; j < parts.Length; j++)
+                    {
+                        if (nodes[j].Length != 2)
+                        {
+                            Console.WriteLine("Please enter a valid input.");
+                            wrong = true;
+                            break;
+                        }
+                        if (!int.TryParse(nodes[j][0].Trim(), out int left) ||
+                            !int.TryParse(nodes[j][1].Trim(), out int right))
+                        {
+                            Console.WriteLine("Please enter a valid input.");
+                            wrong = true;
+                            break;
+                        }
+                        if (left < 0 || left >= circuit[i+1].Length ||
+                            right < 0 || right >= circuit[i+1].Length)
+                        {
+                            Console.WriteLine("Please enter a valid input.");
+                            wrong = true;
+                            break;
+                        }
+                    }
+                    if (wrong) continue;
+                    for (int j = 0; j < parts.Length; j++)
+                    {
+                        circuit[i][j].set_left(circuit[i + 1][int.Parse(nodes[j][0])]);
+                        circuit[i][j].set_right(circuit[i + 1][int.Parse(nodes[j][1])]);
+                    }
+                    break;
+                }
+            }
+
+            gateNum = new int[layer];
+            bitsLen = new int[layer];
+            for (int i = 0; i < layer; i++)
+            {
+                gateNum[i] = circuit[i].Length;
                 if (gateNum[i] == 1)
                 {
                     bitsLen[i] = 1;
                     continue;
                 }
                 bitsLen[i] = (int)Math.Ceiling(Math.Log(gateNum[i], 2));
-
-                Console.WriteLine($"bitLen {i}:" + bitsLen[i]);
-
             }
+
+            for (int i = layer - 1; i >= 0; i--)                           // calculate values
+            {
+                for (int j = 0; j < circuit[i].Length; j++)
+                {
+                    circuit[i][j].calculate_value();
+                }
+            }
+
+
+            //int mod = 83;                                                               //初始化電路
+            //int layer = 3;
+            //int[] gateNum = { 1, 2, 4, 8 };
+            //int[] bitsLen = new int[gateNum.Length];
+            //for (int i = 0; i < gateNum.Length; i++)
+            //{
+            //    if (gateNum[i] == 1)
+            //    {
+            //        bitsLen[i] = 1;
+            //        continue;
+            //    }
+            //    bitsLen[i] = (int)Math.Ceiling(Math.Log(gateNum[i], 2));
+
+            //    Console.WriteLine($"bitLen {i}:" + bitsLen[i]);
+
+            //}
 
             Prover prover = new Prover(layer, gateNum, bitsLen, mod);                   //建立P,V
             Verifier verifier = new Verifier(mod);
