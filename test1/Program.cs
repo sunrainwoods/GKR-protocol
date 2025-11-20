@@ -19,7 +19,7 @@ namespace test1
         //    }
         //    return result;
         //}
-        private static int[] IntToBinary(int n, int len)
+        private static int[] IntToBinary(int n, int len)                //轉換完的結果從左邊看
         {
             int[] bits = new int[len];
             for (int i = 0; i < len; i++)
@@ -32,19 +32,19 @@ namespace test1
             return bits;
         }
 
-        private static int Mod(int a, int mod)
+        private static int Mod(long a, int mod)
         {
-            int res = a % mod;
+            int res = (int)(a % mod);
             if (res < 0) res += mod;
             return res;
         }
 
-        private static Func<int[], int[], int[], int> AddPoly(int layer, Node[][] circuit)                  //創建加法多項式
+        private static Func<int[], int[], int[], int> AddPoly(int layer, Node[][] circuit, int mod)                  //創建加法多項式
         {
             return (int[] a, int[] b, int[] c) =>
             {
-                int s = 0;
-                int term = 1;
+                long s = 0;
+                long term = 1;
                 for (int i = 0; i < circuit[layer].Length; i++)
                 {
                     if (circuit[layer][i].sign == 0)
@@ -52,34 +52,34 @@ namespace test1
                         int[] index = IntToBinary(i, a.Length);
                         for (int j = 0; j < index.Length; j++)
                         {
-                            if (index[j] == 1) term *= a[j];
-                            else if (index[j] == 0) term *= (1 - a[j]);
+                            long val = (index[j] == 1) ? a[j] : (1 - a[j]);
+                            term = Mod(term * val, mod);
                         }
                         index = IntToBinary(circuit[layer][i].left.index, b.Length);
                         for (int j = 0; j < index.Length; j++)
                         {
-                            if (index[j] == 1) term *= b[j];
-                            else if (index[j] == 0) term *= (1 - b[j]);
+                            long val = (index[j] == 1) ? b[j] : (1 - b[j]);
+                            term = Mod(term * val, mod);
                         }
                         index = IntToBinary(circuit[layer][i].right.index, c.Length);
                         for (int j = 0; j < index.Length; j++)
                         {
-                            if (index[j] == 1) term *= c[j];
-                            else if (index[j] == 0) term *= (1 - c[j]);
+                            long val = (index[j] == 1) ? c[j] : (1 - c[j]);
+                            term = Mod(term * val, mod);
                         }
-                        s += term;
+                        s = Mod(s + term, mod);
                     }
                 }
-                return s;
+                return (int)s;
             };
         }
 
-        private static Func<int[], int[], int[], int> MulPoly(int layer, Node[][] circuit)                      //創建乘法多項式
+        private static Func<int[], int[], int[], int> MulPoly(int layer, Node[][] circuit, int mod)                      //創建乘法多項式
         {
             return (int[] a, int[] b, int[] c) =>
             {
-                int s = 0;
-                int term = 1;
+                long s = 0;
+                long term = 1;
                 for (int i = 0; i < circuit[layer].Length; i++)
                 {
                     if (circuit[layer][i].sign == 1)
@@ -87,25 +87,25 @@ namespace test1
                         int[] index = IntToBinary(i, a.Length);
                         for (int j = 0; j < index.Length; j++)
                         {
-                            if (index[j] == 1) term *= a[j];
-                            else if (index[j] == 0) term *= (1 - a[j]);
+                            long val = (index[j] == 1) ? a[j] : (1 - a[j]);
+                            term = Mod(term * val, mod);
                         }
                         index = IntToBinary(circuit[layer][i].left.index, b.Length);
                         for (int j = 0; j < index.Length; j++)
                         {
-                            if (index[j] == 1) term *= b[j];
-                            else if (index[j] == 0) term *= (1 - b[j]);
+                            long val = (index[j] == 1) ? b[j] : (1 - b[j]);
+                            term = Mod(term * val, mod);
                         }
                         index = IntToBinary(circuit[layer][i].right.index, c.Length);
                         for (int j = 0; j < index.Length; j++)
                         {
-                            if (index[j] == 1) term *= c[j];
-                            else if (index[j] == 0) term *= (1 - c[j]);
+                            long val = (index[j] == 1) ? c[j] : (1 - c[j]);
+                            term = Mod(term * val, mod);
                         }
-                        s += term;
+                        s = Mod(s + term, mod);
                     }
                 }
-                return s;
+                return (int)s;
             };
         }
 
@@ -192,25 +192,25 @@ namespace test1
             {
                 return (int[] z) =>
                 {
-                    int s = 0;
+                    long s = 0;
                     for (int i = 0; i < gateNum[layer]; i++)
                     {
-                        int term = W(layer, i);
+                        long term = W(layer, i);
                         int[] indexBits = IntToBinary(i, bitsLen[layer]);
                         for (int j = 0; j < z.Length; j++)
                         {
-                            if (indexBits[j] == 1) term *= z[j];
-                            else if (indexBits[j] == 0) term *= (1 - z[j]);
+                            long val = (indexBits[j] == 1) ? z[j] : (1 - z[j]);
+                            term = Mod(term * val, mod);
                         }
-                        s += term;
+                        s = Mod(s + term, mod);
 
                         //Console.WriteLine("term: " + term);
 
                     }
 
-                    Console.WriteLine("s = " + s);
+                    //Console.WriteLine("s = " + s);
 
-                    return Mod(s, mod);
+                    return (int)s;
                 };
             }
 
@@ -218,11 +218,18 @@ namespace test1
             {
                 return (int[] a, int[] b, int[] c) =>
                 {
-                    int s = 0;
+                    long s = 0;
                     var nextLayerV = Vs[layer + 1];
-                    s += AddPoly(layer, circuit)(a, b, c) * (nextLayerV(b) + nextLayerV(c));
-                    s += MulPoly(layer, circuit)(a, b, c) * (nextLayerV(b) * nextLayerV(c));
-                    return Mod(s, mod);
+
+                    long addPart = AddPoly(layer, circuit, mod)(a, b, c);
+                    long vSum = Mod((long)nextLayerV(b) + nextLayerV(c), mod);
+                    s = Mod(s + (addPart * vSum), mod);
+
+                    long mulPart = MulPoly(layer, circuit, mod)(a, b, c);
+                    long vProd = Mod((long)nextLayerV(b) * nextLayerV(c), mod);
+                    s = Mod(s + (mulPart * vProd), mod);
+
+                    return (int)s;
                 };
             }
 
@@ -230,7 +237,7 @@ namespace test1
             {
                 return (int z) =>
                 {
-                    int s = 0;
+                    long s = 0;
                     var g = funs[nowLayer];
                     int[] parameter = new int[bitsLen[nowLayer] + bitsLen[nowLayer + 1] + bitsLen[nowLayer + 1]];
                     for (int i = 0; i < fixed_var.Length; i++) parameter[i] = fixed_var[i];
@@ -242,17 +249,18 @@ namespace test1
                         {
                             parameter[fixed_var.Length + 1 + j] = restBits[j];
                         }
-                        s += g(
+                        long val = g(
                             parameter.Take(bitsLen[nowLayer]).ToArray(),
                             parameter.Skip(bitsLen[nowLayer]).Take(bitsLen[nowLayer + 1]).ToArray(),
                             parameter.Skip(bitsLen[nowLayer] + bitsLen[nowLayer + 1]).Take(bitsLen[nowLayer + 1]).ToArray()
                             );
+                        s = Mod(s + val, mod);
 
                         //if (nowLayer == 1) Console.WriteLine($"z: {z} ,paramter: " + string.Join(", ", parameter));
                         //if (nowLayer == 1) Console.WriteLine("s: " + s);
 
                     }
-                    return Mod(s, mod);
+                    return (int)s;
                 };
             }
 
@@ -265,7 +273,8 @@ namespace test1
                     int[] l = new int[bitsLen[layer + 1]];
                     for (int i = 0; i < l.Length; i++)
                     {
-                        l[i] = Mod(b[i] * (1 - z) + c[i] * z, mod);
+                        long val = (long)b[i] * (1 - z) + (long)c[i] * z;
+                        l[i] = Mod(val, mod);
                     }
                     return l;
                 };
@@ -279,7 +288,7 @@ namespace test1
                     var l = make_l(layer, fixed_var);
                     var V_next = Vs[layer + 1];
                     s = V_next(l(z));
-                    return Mod(s, mod);
+                    return s;
                 };
             }
 
@@ -312,19 +321,19 @@ namespace test1
             {
                 return (int[] z) =>
                 {
-                    int s = 0;
+                    long s = 0;
                     for (int i = 0; i < input.Length; i++)
                     {
-                        int term = (int)input[i].value;
+                        long term = (int)input[i].value;
                         int[] indexBits = IntToBinary(i, bitslen);
                         for (int j = 0; j < z.Length; j++)
                         {
-                            if (indexBits[j] == 1) term *= z[j];
-                            else if (indexBits[j] == 0) term *= (1 - z[j]);
+                            long val = (indexBits[j] == 1) ? z[j] : (1 - z[j]);
+                            term = Mod(term * val, mod);
                         }
-                        s += term;
+                        s = Mod(s + term, mod);
                     }
-                    return Mod(s, mod);
+                    return (int)s;
                 };
             }
         }
@@ -468,10 +477,10 @@ namespace test1
                 }
             }
 
-            foreach (var n in circuit)                                 // print circuit values
-            {
-                Console.WriteLine(string.Join(", ", n.Select(x => x.value)));
-            }
+            //foreach (var n in circuit)                                 // print circuit values
+            //{
+            //    Console.WriteLine(string.Join(", ", n.Select(x => x.value)));
+            //}
 
 
             //建立P,V
@@ -489,21 +498,18 @@ namespace test1
 
             Console.Write("P: send D() and the circuit outputs: ");
             for (int i = 0; i < gateNum[0]; i++) Console.Write(claimed_D(IntToBinary(i, bitsLen[0])) + ", ");
-            //Console.WriteLine("\nV: pick fixed_var");
+
+            // 測試用固定值
+             fixed_var[0] = 2; fixed_var[1] = 1;
             //for (int i = 0; i < fixed_var.Length; i++) fixed_var[i] = verifier.pickRandom();
-
-            fixed_var[0] = 309;
-            fixed_var[1] = 209;
-
-            Console.WriteLine("V: fixed_var = " + string.Join(", ", fixed_var));
-
+            Console.WriteLine("\nV:send fixed_var and the fixed_var = " + string.Join(", ", fixed_var));
 
             claimed = claimed_D(fixed_var);
             Console.WriteLine("P: claimed D(fixed_var) = " + claimed);
 
             for (int now_layer = 0; now_layer < layer-1; now_layer++)
             {
-                Console.WriteLine("\n sum check ");
+                Console.WriteLine(" sum check ");
                 for (int i = 0; i < bitsLen[now_layer + 1] * 2 ; i++)
                 {
                     var G = prover.make_G(fixed_var, now_layer);
@@ -512,10 +518,10 @@ namespace test1
 
                     //Console.WriteLine($" G(0): {G(0)}, G(1): {G(1)} ");
 
-                    term = Mod(G(0) + G(1), mod);
+                    term = Mod( (long)G(0) + (long)G(1), mod);
                     if (term != claimed) { Console.WriteLine("V: sum check failed"); return; }
                     int s = verifier.pickRandom();
-                    Console.WriteLine($"V: pick s{i} = {s}");
+                    Console.WriteLine($"V: send s{i} = {s}");
                     fixed_var = fixed_var.Append(s).ToArray();
                     claimed = G(s);
                     Console.WriteLine($"P: claimed G{i}(s{i}) = {claimed}");
@@ -528,15 +534,21 @@ namespace test1
                         int[] b = fixed_var.Skip(bitsLen[now_layer]).Take(bitsLen[now_layer + 1]).ToArray();
                         int[] c = fixed_var.Skip(bitsLen[now_layer] + bitsLen[now_layer + 1]).Take(bitsLen[now_layer + 1]).ToArray();
                         Console.WriteLine("V: sum check final check ");
-                        term = Mod((AddPoly(now_layer, circuit)(a, b, c) * (claimed_poly(0) + claimed_poly(1))) + 
-                                   (MulPoly(now_layer, circuit)(a, b, c) * (claimed_poly(0) * claimed_poly(1))), mod);
+
+                        long q0 = claimed_poly(0);
+                        long q1 = claimed_poly(1);
+                        long addPolyVal = AddPoly(now_layer, circuit, mod)(a, b, c);
+                        long mulPolyVal = MulPoly(now_layer, circuit, mod)(a, b, c);
+                        long part1 = Mod(addPolyVal * Mod(q0 + q1, mod), mod);
+                        long part2 = Mod(mulPolyVal * Mod(q0 * q1, mod), mod);
+                        term = Mod(part1 + part2, mod);
 
                         //Console.WriteLine("term: " + term);
 
                         if (claimed != term) { Console.WriteLine("V: final check failed"); return; }
                         Console.WriteLine(" sum check passed ");
                         random_var = verifier.pickRandom();
-                        Console.WriteLine($"V: pick r{now_layer + 1} = " + random_var);
+                        Console.WriteLine($"V: send r{now_layer + 1} = " + random_var);
                         claimed = claimed_poly(random_var);
                         Console.WriteLine($"P: claimed q{now_layer + 1}(r{now_layer + 1}) = " + claimed);
                         l_poly  = prover.make_l(now_layer, fixed_var);
