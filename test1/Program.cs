@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.IO.Ports;
 using System.Linq;
 using System.Net.NetworkInformation;
@@ -10,15 +11,6 @@ namespace test1
 {
     internal class Program
     {
-        //private static int BinaryToInt(int[] bits)
-        //{
-        //    int result = 0;
-        //    for (int i = 0; i < bits.Length; i++)
-        //    {
-        //        result |= bits[i] << i;
-        //    }
-        //    return result;
-        //}
         private static int[] IntToBinary(int n, int len)                //轉換完的結果從左邊看
         {
             int[] bits = new int[len];
@@ -26,9 +18,6 @@ namespace test1
             {
                 bits[i] = (n >> i) & 1;
             }
-
-            //Console.WriteLine("IntToBinary: " + n + " -> " + string.Join(", ", bits));
-
             return bits;
         }
 
@@ -44,11 +33,11 @@ namespace test1
             return (int[] a, int[] b, int[] c) =>
             {
                 long s = 0;
-                long term = 1;
                 for (int i = 0; i < circuit[layer].Length; i++)
                 {
                     if (circuit[layer][i].sign == 0)
                     {
+                        long term = 1;
                         int[] index = IntToBinary(i, a.Length);
                         for (int j = 0; j < index.Length; j++)
                         {
@@ -79,11 +68,11 @@ namespace test1
             return (int[] a, int[] b, int[] c) =>
             {
                 long s = 0;
-                long term = 1;
                 for (int i = 0; i < circuit[layer].Length; i++)
                 {
                     if (circuit[layer][i].sign == 1)
                     {
+                        long term = 1;
                         int[] index = IntToBinary(i, a.Length);
                         for (int j = 0; j < index.Length; j++)
                         {
@@ -203,13 +192,7 @@ namespace test1
                             term = Mod(term * val, mod);
                         }
                         s = Mod(s + term, mod);
-
-                        //Console.WriteLine("term: " + term);
-
                     }
-
-                    //Console.WriteLine("s = " + s);
-
                     return (int)s;
                 };
             }
@@ -255,10 +238,6 @@ namespace test1
                             parameter.Skip(bitsLen[nowLayer] + bitsLen[nowLayer + 1]).Take(bitsLen[nowLayer + 1]).ToArray()
                             );
                         s = Mod(s + val, mod);
-
-                        //if (nowLayer == 1) Console.WriteLine($"z: {z} ,paramter: " + string.Join(", ", parameter));
-                        //if (nowLayer == 1) Console.WriteLine("s: " + s);
-
                     }
                     return (int)s;
                 };
@@ -398,7 +377,7 @@ namespace test1
                             break;
                         }
                     }
-                    else if (n.Distinct().All(c => c == '0' || c == '1') && n.Length > 0)
+                    else if (n.Distinct().All(p => p == '0' || p == '1') && n.Length > 0)
                     {
                         circuit[i] = new Node[n.Length];
                         for (int j = 0; j < n.Length; j++)
@@ -477,12 +456,6 @@ namespace test1
                 }
             }
 
-            //foreach (var n in circuit)                                 // print circuit values
-            //{
-            //    Console.WriteLine(string.Join(", ", n.Select(x => x.value)));
-            //}
-
-
             //建立P,V
             Prover prover = new Prover(layer, gateNum, bitsLen, mod, circuit);
             Verifier verifier = new Verifier(mod);
@@ -495,14 +468,15 @@ namespace test1
             int claimed;
             int term;
             Func<int, int[]> l_poly;
+            int[] a, b, c;
 
-            Console.Write("P: send D() and the circuit outputs: ");
-            for (int i = 0; i < gateNum[0]; i++) Console.Write(claimed_D(IntToBinary(i, bitsLen[0])) + ", ");
+            Console.Write("\nP: send D() and the circuit outputs: ");
+            for (int i = 0; i < gateNum[0]; i++) Console.Write(claimed_D(IntToBinary(i, bitsLen[0])) + " ");
 
             // 測試用固定值
-             fixed_var[0] = 2; fixed_var[1] = 1;
-            //for (int i = 0; i < fixed_var.Length; i++) fixed_var[i] = verifier.pickRandom();
-            Console.WriteLine("\nV:send fixed_var and the fixed_var = " + string.Join(", ", fixed_var));
+             //fixed_var[0] = 2; fixed_var[1] = 1;
+            for (int i = 0; i < fixed_var.Length; i++) fixed_var[i] = verifier.pickRandom();
+            Console.WriteLine("\nV: send fixed_var and the fixed_var = " + string.Join(", ", fixed_var));
 
             claimed = claimed_D(fixed_var);
             Console.WriteLine("P: claimed D(fixed_var) = " + claimed);
@@ -515,9 +489,6 @@ namespace test1
                     var G = prover.make_G(fixed_var, now_layer);
                     Console.WriteLine($"P: send G{i}");
                     Console.WriteLine($"V: Verifying G{i}(0) + G{i}(1) = claimed");
-
-                    //Console.WriteLine($" G(0): {G(0)}, G(1): {G(1)} ");
-
                     term = Mod( (long)G(0) + (long)G(1), mod);
                     if (term != claimed) { Console.WriteLine("V: sum check failed"); return; }
                     int s = verifier.pickRandom();
@@ -530,20 +501,16 @@ namespace test1
                     {
                         claimed_poly = prover.make_q(now_layer, fixed_var);
                         Console.WriteLine($"P: send claimed_poly q{now_layer + 1}");
-                        int[] a = fixed_var.Take(bitsLen[now_layer]).ToArray();
-                        int[] b = fixed_var.Skip(bitsLen[now_layer]).Take(bitsLen[now_layer + 1]).ToArray();
-                        int[] c = fixed_var.Skip(bitsLen[now_layer] + bitsLen[now_layer + 1]).Take(bitsLen[now_layer + 1]).ToArray();
                         Console.WriteLine("V: sum check final check ");
 
-                        long q0 = claimed_poly(0);
-                        long q1 = claimed_poly(1);
+                        a = fixed_var.Take(bitsLen[now_layer]).ToArray();
+                        b = fixed_var.Skip(bitsLen[now_layer]).Take(bitsLen[now_layer + 1]).ToArray();
+                        c = fixed_var.Skip(bitsLen[now_layer] + bitsLen[now_layer + 1]).Take(bitsLen[now_layer + 1]).ToArray();
                         long addPolyVal = AddPoly(now_layer, circuit, mod)(a, b, c);
                         long mulPolyVal = MulPoly(now_layer, circuit, mod)(a, b, c);
-                        long part1 = Mod(addPolyVal * Mod(q0 + q1, mod), mod);
-                        long part2 = Mod(mulPolyVal * Mod(q0 * q1, mod), mod);
+                        long part1 = Mod(addPolyVal * Mod(claimed_poly(0) + claimed_poly(1), mod), mod);
+                        long part2 = Mod(mulPolyVal * Mod(claimed_poly(0) * claimed_poly(1), mod), mod);
                         term = Mod(part1 + part2, mod);
-
-                        //Console.WriteLine("term: " + term);
 
                         if (claimed != term) { Console.WriteLine("V: final check failed"); return; }
                         Console.WriteLine(" sum check passed ");
@@ -556,17 +523,23 @@ namespace test1
                         for (int j = 0; j < fixed_var.Length; j++)
                         {
                             fixed_var[j] = l_poly(random_var)[j];
-
-                            //Console.WriteLine(now_layer);
-                            //Console.WriteLine($" fixed_var {j}: " + fixed_var[j]);
-
                         }
                     }
                 }
             }
+            Console.WriteLine("V: construct input layer poly");
             var input_poly = verifier.make_input(circuit[layer - 1], bitsLen[layer - 1]);
-            term = input_poly(fixed_var);
             Console.WriteLine("V: sum check final check ");
+
+            a = fixed_var.Take(bitsLen[layer-2]).ToArray();
+            b = fixed_var.Skip(bitsLen[layer-2]).Take(bitsLen[layer-1]).ToArray();
+            c = fixed_var.Skip(bitsLen[layer-2] + bitsLen[layer-1]).Take(bitsLen[layer-1]).ToArray();
+            long final_addPolyVal = AddPoly(layer-2, circuit, mod)(a, b, c);
+            long final_mulPolyVal = MulPoly(layer-2, circuit, mod)(a, b, c);
+            long final_part1 = Mod(final_addPolyVal * Mod(input_poly(b) + input_poly(c), mod), mod);
+            long final_part2 = Mod(final_mulPolyVal * Mod(input_poly(b) * input_poly(c), mod), mod);
+            term = Mod(final_part1 + final_part2, mod);
+
             if (claimed != term) { Console.WriteLine("V: final check failed"); return; }
             Console.WriteLine(" sum check passed ");
             Console.WriteLine(" Verifier can trust D() ");
