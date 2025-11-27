@@ -4,6 +4,7 @@ using System.IO;
 using System.IO.Ports;
 using System.Linq;
 using System.Net.NetworkInformation;
+using System.Reflection.Emit;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -153,11 +154,13 @@ namespace test1
         {
             private Func<int[], int[], int[], int>[] funs;
             private Func<int[], int>[] Vs;
+            private Func<int[], int>[] maskedPolys;
             private int layer;
             private int[] gateNum;
             private int[] bitsLen;
             private int mod;
             private Node[][] circuit;
+            private Random rand;
 
             public Prover(int layer, int[] gateNum, int[] bitsLen, int mod, Node[][] circuit)
             {
@@ -166,10 +169,13 @@ namespace test1
                 this.bitsLen = bitsLen;
                 this.mod = mod;
                 this.circuit = circuit;
+                rand = new Random();
                 Vs = new Func<int[], int>[layer];
                 funs = new Func<int[], int[], int[], int>[layer-1];
+                maskedPolys = new Func<int[], int>[layer-1];
                 for (int i = 0; i <= layer-1; i++) Vs[i] = make_V(i);
                 for (int i = 0; i < layer - 1; i++) funs[i] = make_f(i);
+                for (int i = 0; i < layer - 1; i++) maskedPolys[i] = make_H(bitsLen[i] + bitsLen[i+1] + bitsLen[i+1]);
             }
 
             public int W(int now_lawer, int index)
@@ -216,11 +222,12 @@ namespace test1
                 };
             }
 
-            public Func<int, int> make_G(int[] fixed_var, int nowLayer)
+            public Func<int, int> make_G(int[] fixed_var, int nowLayer, int rho)
             {
                 return (int z) =>
                 {
                     long s = 0;
+                    long val1 = 0; long val2 = 0;
                     var g = funs[nowLayer];
                     int[] parameter = new int[bitsLen[nowLayer] + bitsLen[nowLayer + 1] + bitsLen[nowLayer + 1]];
                     for (int i = 0; i < fixed_var.Length; i++) parameter[i] = fixed_var[i];
@@ -232,13 +239,16 @@ namespace test1
                         {
                             parameter[fixed_var.Length + 1 + j] = restBits[j];
                         }
-                        long val = g(
+                        val1 += g(
                             parameter.Take(bitsLen[nowLayer]).ToArray(),
                             parameter.Skip(bitsLen[nowLayer]).Take(bitsLen[nowLayer + 1]).ToArray(),
                             parameter.Skip(bitsLen[nowLayer] + bitsLen[nowLayer + 1]).Take(bitsLen[nowLayer + 1]).ToArray()
                             );
-                        s = Mod(s + val, mod);
+                        val1 = Mod(val1, mod);
+                        val2 += maskedPolys[nowLayer](parameter);
+                        val2 = Mod(val2, mod);
                     }
+                    s = Mod(val1 + Mod(rho * val2, mod), mod);
                     return (int)s;
                 };
             }
@@ -276,6 +286,60 @@ namespace test1
                 return (int[] z) =>
                 {
                     return Vs[0](z);
+                };
+            }
+
+            public int maskSum(int layer, int[] fixed_var)
+            {
+                long s = 0;
+                int[] parameter = new int[bitsLen[layer] + bitsLen[layer+1] + bitsLen[layer+1]];
+                for (int i = 0; i < fixed_var.Length; i++) parameter[i] = fixed_var[i];
+                if (parameter.Length == fixed_var.Length) return maskedPolys[layer](parameter);
+                for (int i = 0; i < Math.Pow(2, parameter.Length - fixed_var.Length); i++)
+                {
+                    int[] restBits = IntToBinary(i, parameter.Length - fixed_var.Length);
+                    for (int j = 0; j < restBits.Length; j++)
+                    {
+                        parameter[fixed_var.Length + j] = restBits[j];
+                    }
+                    s = Mod(s + maskedPolys[layer](parameter), mod);
+                }
+                return (int)s;
+            }
+
+            public int pickRandom()
+            {
+                return rand.Next(mod);
+            }
+
+            public Func<int[], int> make_H(int numVars)                             //創建隱藏多項式，因為 f 最高次方為 2
+            {
+                // 在這裡先生成並儲存所有係數
+                long constantTerm = pickRandom();
+                long[] coeffA = new long[numVars];
+                long[] coeffB = new long[numVars];
+
+                for (int i = 0; i < numVars; i++)
+                {
+                    coeffA[i] = pickRandom();
+                    coeffB[i] = pickRandom();
+                }
+
+                // 回傳的函數使用上述固定的係數
+                return (int[] parameter) =>
+                {
+                    long s = constantTerm;
+                    for (int i = 0; i < parameter.Length; i++)
+                    {
+                        // 使用固定的 coeffA[i] 和 coeffB[i]
+                        long val = Mod((long)parameter[i] * parameter[i], mod);
+                        val = Mod(val * coeffB[i], mod);
+                        s = Mod(s + val, mod);
+
+                        val = Mod((long)parameter[i] * coeffA[i], mod);
+                        s = Mod(s + val, mod);
+                    }
+                    return (int)s;
                 };
             }
         }
@@ -469,12 +533,12 @@ namespace test1
             int term;
             Func<int, int[]> l_poly;
             int[] a, b, c;
+            int rho;
+            int maskSum;
 
             Console.Write("\nP: send D() and the circuit outputs: ");
             for (int i = 0; i < gateNum[0]; i++) Console.Write(claimed_D(IntToBinary(i, bitsLen[0])) + " ");
 
-            // 測試用固定值
-             //fixed_var[0] = 2; fixed_var[1] = 1;
             for (int i = 0; i < fixed_var.Length; i++) fixed_var[i] = verifier.pickRandom();
             Console.WriteLine("\nV: send fixed_var and the fixed_var = " + string.Join(", ", fixed_var));
 
@@ -483,10 +547,16 @@ namespace test1
 
             for (int now_layer = 0; now_layer < layer-1; now_layer++)
             {
+                maskSum = prover.maskSum(now_layer, fixed_var);
+                Console.WriteLine("P: send maskSum = " +  maskSum);
+                rho = verifier.pickRandom();
+                Console.WriteLine("V: send rho = " + rho);
+
+                claimed = Mod(claimed + Mod(rho * maskSum, mod), mod);
                 Console.WriteLine(" sum check ");
                 for (int i = 0; i < bitsLen[now_layer + 1] * 2 ; i++)
                 {
-                    var G = prover.make_G(fixed_var, now_layer);
+                    var G = prover.make_G(fixed_var, now_layer, rho);
                     Console.WriteLine($"P: send G{i}");
                     Console.WriteLine($"V: Verifying G{i}(0) + G{i}(1) = claimed");
                     term = Mod( (long)G(0) + (long)G(1), mod);
@@ -496,11 +566,40 @@ namespace test1
                     fixed_var = fixed_var.Append(s).ToArray();
                     claimed = G(s);
                     Console.WriteLine($"P: claimed G{i}(s{i}) = {claimed}");
-                    if (now_layer == layer-2 && i == bitsLen[now_layer + 1] * 2 - 1) break;
-                    if (i == bitsLen[now_layer + 1] * 2 - 1)
+                    if (now_layer == layer-2 && i == bitsLen[now_layer + 1] * 2 - 1)                                        //最後一次sumcheck的最後一輪
+                    {
+                        Console.WriteLine("V: construct input layer poly");
+                        var input_poly = verifier.make_input(circuit[layer - 1], bitsLen[layer - 1]);
+                        maskSum = prover.maskSum(now_layer, fixed_var);
+                        Console.WriteLine("P: send maskSum with fixed_var = " + maskSum);
+                        claimed = Mod(claimed - Mod(rho * maskSum, mod), mod);
+                        Console.WriteLine("V: claimed - rho * maskSum");
+
+                        Console.WriteLine("V: sum check final check ");
+
+                        a = fixed_var.Take(bitsLen[layer - 2]).ToArray();
+                        b = fixed_var.Skip(bitsLen[layer - 2]).Take(bitsLen[layer - 1]).ToArray();
+                        c = fixed_var.Skip(bitsLen[layer - 2] + bitsLen[layer - 1]).Take(bitsLen[layer - 1]).ToArray();
+                        long final_addPolyVal = AddPoly(layer - 2, circuit, mod)(a, b, c);
+                        long final_mulPolyVal = MulPoly(layer - 2, circuit, mod)(a, b, c);
+                        long final_part1 = Mod(final_addPolyVal * Mod(input_poly(b) + input_poly(c), mod), mod);
+                        long final_part2 = Mod(final_mulPolyVal * Mod(input_poly(b) * input_poly(c), mod), mod);
+                        term = Mod(final_part1 + final_part2, mod);
+
+                        if (claimed != term) { Console.WriteLine("V: final check failed"); return; }
+                        Console.WriteLine(" sum check passed ");
+                        Console.WriteLine(" Verifier can trust D() ");
+                        break;
+                    }
+                    if (i == bitsLen[now_layer + 1] * 2 - 1)                                                                //sumcheck的最後一輪
                     {
                         claimed_poly = prover.make_q(now_layer, fixed_var);
                         Console.WriteLine($"P: send claimed_poly q{now_layer + 1}");
+                        maskSum = prover.maskSum(now_layer, fixed_var);
+                        Console.WriteLine("P: send maskSum with fixed_var = " + maskSum);
+                        claimed = Mod(claimed - Mod(rho * maskSum, mod), mod);
+                        Console.WriteLine("V: claimed - rho * maskSum");
+
                         Console.WriteLine("V: sum check final check ");
 
                         a = fixed_var.Take(bitsLen[now_layer]).ToArray();
@@ -527,22 +626,6 @@ namespace test1
                     }
                 }
             }
-            Console.WriteLine("V: construct input layer poly");
-            var input_poly = verifier.make_input(circuit[layer - 1], bitsLen[layer - 1]);
-            Console.WriteLine("V: sum check final check ");
-
-            a = fixed_var.Take(bitsLen[layer-2]).ToArray();
-            b = fixed_var.Skip(bitsLen[layer-2]).Take(bitsLen[layer-1]).ToArray();
-            c = fixed_var.Skip(bitsLen[layer-2] + bitsLen[layer-1]).Take(bitsLen[layer-1]).ToArray();
-            long final_addPolyVal = AddPoly(layer-2, circuit, mod)(a, b, c);
-            long final_mulPolyVal = MulPoly(layer-2, circuit, mod)(a, b, c);
-            long final_part1 = Mod(final_addPolyVal * Mod(input_poly(b) + input_poly(c), mod), mod);
-            long final_part2 = Mod(final_mulPolyVal * Mod(input_poly(b) * input_poly(c), mod), mod);
-            term = Mod(final_part1 + final_part2, mod);
-
-            if (claimed != term) { Console.WriteLine("V: final check failed"); return; }
-            Console.WriteLine(" sum check passed ");
-            Console.WriteLine(" Verifier can trust D() ");
         }
 
         static void Main(string[] args)
