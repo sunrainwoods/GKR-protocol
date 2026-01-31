@@ -40,114 +40,242 @@ namespace test1
             return res;
         }
 
-        // --- Multilinear Polynomial Commitment (Simulation of Hyrax/Libra) ---
-        // In a full implementation, this would use Pedersen Commitments and an 
-        // Inner Product Argument (IPA) or a layered Sumcheck to prove evaluation.
-        // Here we simulate the interface and the correct mathematical values 
-        // to allow the GKR protocol to close the loop "honestly" regarding values.
-        class MultilinearCommitment
+        class MultilinearKZG
         {
-            private MCL.G1[] srs;
+            private MCL.G1[][] srsLevels; // srsLevels[k] is the SRS for the sub-cube of size 2^{n-k}
+            private MCL.G2[] tauG2;       // Secret scalars in G2: [tau_0]_2, ...
+            private MCL.G2 g2Base;        // [1]_2
+            private MCL.G1 g1Base;        // [1]_1
             private int numVars;
-            
-            public MultilinearCommitment(int numVars)
+
+            public MultilinearKZG(int numVars)
             {
                 this.numVars = numVars;
-                int size = 1 << numVars; // 2^n
-                srs = new MCL.G1[size];
             }
 
             public void Setup()
             {
-                // Generate random SRS points (Pedersen Base)
-                var gen = new MCL.G1();
-                gen.HashAndMapTo(Encoding.UTF8.GetBytes("GEN_SRS"));
+                Console.WriteLine($"    [KZG] Running Trusted Setup for {numVars} variables...");
                 
-                // In a real setup, we would derive these deterministically or via ceremony
-                // Here we just make some distinct points
-                for(int i=0; i<srs.Length; i++)
+                // 1. Generate secrets tau (Trusted Setup Trapdoor)
+                // In a real ceremony, no one knows these. Here we generate them.
+                var taus = new MCL.Fr[numVars];
+                tauG2 = new MCL.G2[numVars];
+                
+                g2Base = new MCL.G2();
+                MCL.G2setDst("test_g2"); // Domain separation
+                g2Base.HashAndMapTo(Encoding.UTF8.GetBytes("GEN_G2"));
+                
+                g1Base = new MCL.G1();
+                MCL.G1setDst("test_g1");
+                g1Base.HashAndMapTo(Encoding.UTF8.GetBytes("GEN_G1"));
+
+                for (int i = 0; i < numVars; i++)
                 {
-                    var h = new MCL.G1();
-                    h.HashAndMapTo(Encoding.UTF8.GetBytes("SRS_" + i));
-                    srs[i] = h;
+                    var t = new MCL.Fr();
+                    t.SetByCSPRNG();
+                    taus[i] = t;
+
+                    // Store [tau]_2 for verification
+                    var tG2 = new MCL.G2();
+                    MCL.Mul(ref tG2, in g2Base, in t);
+                    tauG2[i] = tG2;
+                }
+
+                // 2. Generate Structured SRS for each level
+                // Level k corresponds to a polynomial of (n-k) variables.
+                // We need SRS to commit to polynomials at each step of the opening.
+                srsLevels = new MCL.G1[numVars + 1][];
+
+                for (int level = 0; level <= numVars; level++)
+                {
+                    int remainingVars = numVars - level;
+                    int size = 1 << remainingVars;
+                    srsLevels[level] = new MCL.G1[size];
+
+                    // For remaining variables x_0 ... x_{rem-1}, 
+                    // corresponds to original variables x_{level} ... x_{n-1}
+                    // The basis index 'i' (bits) determines the term:
+                    // Term = product_{j=0}^{rem-1} [ (1-bit_j)(1-tau_{level+j}) + bit_j(tau_{level+j}) ]
+                    
+                    for (int i = 0; i < size; i++)
+                    {
+                        var coeff = ToFr(1);
+                        int[] bits = IntToBinary(i, remainingVars);
+                        
+                        for (int j = 0; j < remainingVars; j++)
+                        {
+                            var t = taus[level + j]; // Map local var j to global var (level+j)
+                            // if bit is 0: (1-t), if bit is 1: t
+                            var term = (bits[j] == 1) ? t : FrSub(ToFr(1), t);
+                            coeff = FrMul(coeff, term);
+                        }
+                        
+                        var pt = new MCL.G1();
+                        MCL.Mul(ref pt, in g1Base, in coeff);
+                        srsLevels[level][i] = pt;
+                    }
                 }
             }
 
             public MCL.G1 Commit(MCL.Fr[] values)
             {
-                if (values.Length > srs.Length) throw new ArgumentException("Input too large for SRS");
+                if (values.Length > srsLevels[0].Length) throw new ArgumentException("Input too large for SRS");
                 
                 var c = new MCL.G1();
                 c.Clear();
                 
-                // Pedersen Commitment: C = sum(v_i * G_i)
-                // We use srs subset matching the values length
-                // Ideally values.Length should be exactly 2^k
-                MCL.MulVec(ref c, srs.Take(values.Length).ToArray(), values);
+                // MSM with the top-level SRS
+                // Note: In a real library, use an optimized MSM algorithm (Pippenger).
+                // Here we simply simulate linear combination.
+                MCL.MulVec(ref c, srsLevels[0], values);
                 
                 return c;
             }
 
-            // Calculates the Multilinear Extension value at point r
-            // This is the "True Value" GKR needs.
-            // In a real PCS, the Prover would generate a proof for this value.
+            // Standard Multilinear Evaluation (Simulated for Prover)
             public MCL.Fr EvaluateMLE(MCL.Fr[] values, MCL.Fr[] r)
             {
-                // Multilinear Evaluation (Streamlined)
-                // We fold the values vector by each variable in r
-                
                 MCL.Fr[] currentLayer = (MCL.Fr[])values.Clone();
                 int layerLen = currentLayer.Length;
-                int numR = r.Length;
-                
-                var one = new MCL.Fr(); one.SetInt(1);
+                var one = ToFr(1);
 
-                for(int i=0; i<numR; i++)
+                for(int i=0; i<r.Length; i++)
                 {
-                    // Fold layer
                     layerLen /= 2;
                     MCL.Fr[] nextLayer = new MCL.Fr[layerLen];
-                    // r corresponds to variables x_0, x_1...
-                    // values are indexed by bits (x_0, x_1...)
-                    // For standard MLE:
-                    // V(r_0, ..., r_{k-1})
-                    // Fold x_0 first (which toggles bit 0 of index):
-                    // fold(v0, v1, r0) = (1-r0)v0 + r0v1
-                    
-                    var ri = r[i]; // Use r[i] to fold the i-th dimension
+                    var ri = r[i];
 
                     for(int j=0; j<layerLen; j++)
                     {
-                        // val = (1-r)*left + r*right
-                        // left = current[2*j], right = current[2*j+1]
-                        
                         var left = currentLayer[2*j];
                         var right = currentLayer[2*j+1];
-                        
                         var term1 = FrMul(FrSub(one, ri), left);
                         var term2 = FrMul(ri, right);
-                        
                         nextLayer[j] = FrAdd(term1, term2);
                     }
                     currentLayer = nextLayer;
                 }
-                
                 return currentLayer[0];
             }
 
-            // Simulates the verification of the opening proof
-            // In reality, this would check an IPA proof or KZG batch proof
-            public bool Verify(MCL.G1 commitment, MCL.Fr[] point, MCL.Fr value)
+            // Generates a Multilinear KZG Proof for f(r) = v
+            // Returns an array of G1 points (one quotient commitment per variable)
+            public MCL.G1[] Open(MCL.Fr[] values, MCL.Fr[] r)
             {
-                // Since we are simulating the heavy crypto proof for the Multilinear case,
-                // we assume if the Prover (our code) calculated it via EvaluateMLE, it is correct.
-                // A real Verify function would take a "Proof" object and check pairings/inner-products.
+                var proofs = new MCL.G1[numVars];
+                var currentValues = (MCL.Fr[])values.Clone();
+                var one = ToFr(1);
+
+                // We peel off variables one by one.
+                // At step i (variable x_i, value r_i):
+                // f(..., x_i, ...) = (1-x_i)L + x_i R = L + x_i(R-L)
+                // We want to prove evaluation at r_i.
+                // The "quotient" for the linear check is q = R - L.
+                // We commit to q using the SRS for the NEXT level (variables x_{i+1}...).
                 
-                // We can print a log to show what's happening mathematically
-                Console.WriteLine($"    [Crypto] Verifying Multilinear Opening at {point.Length} points...");
-                Console.WriteLine($"    [Crypto] Checking consistency with Commitment {commitment.GetStr(10).Substring(0, 10)}...");
-                // (Magic happens here in real Libra)
-                return true;
+                for (int i = 0; i < numVars; i++)
+                {
+                    int nextLen = currentValues.Length / 2;
+                    var lefts = new MCL.Fr[nextLen];
+                    var rights = new MCL.Fr[nextLen];
+                    var quotients = new MCL.Fr[nextLen];
+                    var nextValues = new MCL.Fr[nextLen];
+                    
+                    var ri = r[i];
+
+                    for (int j = 0; j < nextLen; j++)
+                    {
+                        lefts[j] = currentValues[2 * j];
+                        rights[j] = currentValues[2 * j + 1];
+                        
+                        // Quotient polynomial for this step is just the difference (R - L)
+                        // effectively Q(x_{>i}) = R(x_{>i}) - L(x_{>i})
+                        quotients[j] = FrSub(rights[j], lefts[j]);
+
+                        // Fold for next step: (1-r)L + rR
+                        var val = FrAdd(FrMul(FrSub(one, ri), lefts[j]), FrMul(ri, rights[j]));
+                        nextValues[j] = val;
+                    }
+
+                    // Commit to quotient using SRS for the remaining variables
+                    var pi = new MCL.G1();
+                    pi.Clear();
+                    MCL.MulVec(ref pi, srsLevels[i + 1], quotients);
+                    proofs[i] = pi;
+
+                    currentValues = nextValues;
+                }
+
+                return proofs;
+            }
+
+            public bool Verify(MCL.G1 commitment, MCL.Fr[] point, MCL.Fr value, MCL.G1[] proofs)
+            {
+                Console.WriteLine($"    [KZG] Verifying Opening via Bilinear Pairing...");
+                
+                // Pairing Check Equation:
+                // e(C - v*G, [1]_2) = Product_{i=0}^{k-1} e(pi_i, [tau_i]_2 - [r_i]_2)
+                
+                // 1. Calculate LHS: e(C - v*G, [1]_2)
+                var vG = new MCL.G1();
+                MCL.Mul(ref vG, in g1Base, in value);
+                
+                var C_minus_vG = new MCL.G1();
+                MCL.Sub(ref C_minus_vG, in commitment, in vG);
+                
+                var lhs = new MCL.GT();
+                MCL.Pairing(ref lhs, in C_minus_vG, in g2Base); // g2Base is [1]_2
+
+                // 2. Calculate RHS: Product of pairings
+                var rhs = new MCL.GT();
+                rhs.Clear();
+                // We need to initialize RHS to 1 (identity in GT)
+                // Since MCL doesn't have SetOne for GT easily exposed in wrapper, 
+                // we'll set it to result of first pairing and mul others, 
+                // or handle the loop carefully.
+                // Let's assume standard accumulation.
+                
+                bool isRhsInit = false;
+
+                for (int i = 0; i < numVars; i++)
+                {
+                    // Construct [tau_i - r_i]_2
+                    var r_g2 = new MCL.G2();
+                    MCL.Mul(ref r_g2, in g2Base, in point[i]);
+                    
+                    var diff_g2 = new MCL.G2();
+                    MCL.Sub(ref diff_g2, in tauG2[i], in r_g2); // [tau]_2 - [r]_2
+
+                    var term = new MCL.GT();
+                    MCL.Pairing(ref term, in proofs[i], in diff_g2);
+
+                    if (!isRhsInit)
+                    {
+                        rhs = term;
+                        isRhsInit = true;
+                    }
+                    else
+                    {
+                        var temp = new MCL.GT();
+                        MCL.Mul(ref temp, in rhs, in term);
+                        rhs = temp;
+                    }
+                }
+                
+                if (!isRhsInit) throw new Exception("No variables to verify?");
+
+                // 3. Compare
+                if (lhs.Equals(rhs))
+                {
+                    Console.WriteLine("    [KZG] Pairing Check PASSED.");
+                    return true;
+                }
+                else
+                {
+                    Console.WriteLine("    [KZG] Pairing Check FAILED.");
+                    return false;
+                }
             }
         }
 
@@ -657,8 +785,7 @@ namespace test1
             // --- Multilinear PCS Phase (Hyrax/Libra Style) ---
             Console.WriteLine("\n=== PCS Phase: Multilinear Setup & Commit ===");
             int numVars = bitsLen[layer - 1]; // Number of variables in input layer
-            var pcs = new MultilinearCommitment(numVars);
-            Console.WriteLine($"Generating SRS for {numVars} variables...");
+            var pcs = new MultilinearKZG(numVars);
             pcs.Setup();
 
             // Prepare Input Values (as vector for multilinear polynomial)
@@ -759,18 +886,19 @@ namespace test1
                         Console.WriteLine("\n=== PCS Verification Phase (Opening) ===");
                         Console.WriteLine("Verifier needs input values at points b and c (Multilinear Queries).");
                         
-                        // 1. Prover calculates the TRUE Multilinear Extension values
-                        // This corresponds to Prover.Open() in a real protocol
+                        // 1. Prover calculates the TRUE Multilinear Extension values AND Proofs
                         MCL.Fr val_b = pcs.EvaluateMLE(inputValues, b);
+                        MCL.G1[] proof_b = pcs.Open(inputValues, b);
+
                         MCL.Fr val_c = pcs.EvaluateMLE(inputValues, c);
+                        MCL.G1[] proof_c = pcs.Open(inputValues, c);
                         
                         Console.WriteLine($"P: Claims Input(b) = {val_b.GetStr(10)}");
                         Console.WriteLine($"P: Claims Input(c) = {val_c.GetStr(10)}");
 
-                        // 2. Verifier checks the opening proof
-                        // In this simulation, we trust the local EvaluateMLE result corresponds to the commitment
-                        bool verify_b = pcs.Verify(inputCommitment, b, val_b);
-                        bool verify_c = pcs.Verify(inputCommitment, c, val_c);
+                        // 2. Verifier checks the KZG pairing proofs
+                        bool verify_b = pcs.Verify(inputCommitment, b, val_b, proof_b);
+                        bool verify_c = pcs.Verify(inputCommitment, c, val_c, proof_c);
                         
                         if(!verify_b || !verify_c) 
                         {
