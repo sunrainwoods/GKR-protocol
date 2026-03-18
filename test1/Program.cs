@@ -40,6 +40,26 @@ namespace test1
             return res;
         }
 
+        // Helper for G1 addition (For ZK Commitment)
+        private static MCL.G1 G1Add(MCL.G1 a, MCL.G1 b)
+        {
+            var res = new MCL.G1();
+            MCL.Add(ref res, in a, in b);
+            return res;
+        }
+
+        // Helper to add two Fr vectors (Polynomial Addition)
+        private static MCL.Fr[] FrVecAdd(MCL.Fr[] vecA, MCL.Fr[] vecB)
+        {
+            if (vecA.Length != vecB.Length) throw new ArgumentException("Vector lengths mismatch");
+            MCL.Fr[] res = new MCL.Fr[vecA.Length];
+            for (int i = 0; i < vecA.Length; i++)
+            {
+                res[i] = FrAdd(vecA[i], vecB[i]);
+            }
+            return res;
+        }
+
         class MultilinearKZG
         {
             private MCL.G1[][] srsLevels; // srsLevels[k] is the SRS for the sub-cube of size 2^{n-k}
@@ -782,8 +802,8 @@ namespace test1
             Prover prover = new Prover(layer, gateNum, bitsLen, circuit);
             Verifier verifier = new Verifier();
 
-            // --- Multilinear PCS Phase (Hyrax/Libra Style) ---
-            Console.WriteLine("\n=== PCS Phase: Multilinear Setup & Commit ===");
+            // --- Multilinear PCS Phase (Hyrax/Libra Style) WITH ZK MASKING ---
+            Console.WriteLine("\n=== PCS Phase: Multilinear Setup & ZK Commit ===");
             int numVars = bitsLen[layer - 1]; // Number of variables in input layer
             var pcs = new MultilinearKZG(numVars);
             pcs.Setup();
@@ -795,10 +815,25 @@ namespace test1
                 inputValues[i] = circuit[layer - 1][i].value.Value;
             }
 
-            // Commit
-            Console.WriteLine($"Committing to Input Layer...");
+            // 1. Generate Input Commitment (Internal)
+            Console.WriteLine($"Committing to Input Layer (Internal)...");
             var inputCommitment = pcs.Commit(inputValues);
-            Console.WriteLine("P: Commitment C = " + inputCommitment.GetStr(10));
+
+            // 2. Generate Random Masking Polynomial (Coeffs/Values)
+            MCL.Fr[] maskValues = new MCL.Fr[inputValues.Length];
+            for(int i=0; i<maskValues.Length; i++) {
+                maskValues[i] = prover.pickRandom(); // Using prover's RNG to simulate
+            }
+            Console.WriteLine($"Generated Random Mask Vector Size: {maskValues.Length}");
+
+            // 3. Generate Mask Commitment
+            var maskCommitment = pcs.Commit(maskValues);
+
+            // 4. Calculate ZK Commitment (Input + Mask)
+            // This is the only commitment Verifier will see for the input.
+            var zkCommitment = G1Add(inputCommitment, maskCommitment);
+
+            Console.WriteLine("P: ZK Commitment C_zk = " + zkCommitment.GetStr(10));
             Console.WriteLine("=== PCS Phase Complete ===\n");
             // ---------------------------------------------
 
@@ -882,30 +917,46 @@ namespace test1
                         b = fixed_var.Skip(bitsLen[layer - 2]).Take(bitsLen[layer - 1]).ToArray();
                         c = fixed_var.Skip(bitsLen[layer - 2] + bitsLen[layer - 1]).Take(bitsLen[layer - 1]).ToArray();
                         
-                        // --- Multilinear Opening Verification Phase ---
-                        Console.WriteLine("\n=== PCS Verification Phase (Opening) ===");
-                        Console.WriteLine("Verifier needs input values at points b and c (Multilinear Queries).");
+                        // --- Multilinear Opening Verification Phase (ZK) ---
+                        Console.WriteLine("\n=== ZK-KZG Verification Phase (Opening) ===");
+                        Console.WriteLine("Verifier needs verification for input values, using ZK commitment.");
                         
-                        // 1. Prover calculates the TRUE Multilinear Extension values AND Proofs
+                        // 1. Prover calculates Multilinear Extension values
+                        //    Result from Circuit logic (GKR result)
                         MCL.Fr val_b = pcs.EvaluateMLE(inputValues, b);
-                        MCL.G1[] proof_b = pcs.Open(inputValues, b);
-
                         MCL.Fr val_c = pcs.EvaluateMLE(inputValues, c);
-                        MCL.G1[] proof_c = pcs.Open(inputValues, c);
                         
-                        Console.WriteLine($"P: Claims Input(b) = {val_b.GetStr(10)}");
-                        Console.WriteLine($"P: Claims Input(c) = {val_c.GetStr(10)}");
+                        //    Result from Masking Polynomial (Randomness)
+                        MCL.Fr val_mask_b = pcs.EvaluateMLE(maskValues, b);
+                        MCL.Fr val_mask_c = pcs.EvaluateMLE(maskValues, c);
 
-                        // 2. Verifier checks the KZG pairing proofs
-                        bool verify_b = pcs.Verify(inputCommitment, b, val_b, proof_b);
-                        bool verify_c = pcs.Verify(inputCommitment, c, val_c, proof_c);
+                        // 2. Prover sends Mask Values to Verifier
+                        Console.WriteLine($"P: Claims Mask(b) = {val_mask_b.GetStr(10)}");
+                        Console.WriteLine($"P: Claims Mask(c) = {val_mask_c.GetStr(10)}");
+
+                        // 3. Verifier calculates EXPECTED Total Values
+                        //    v_total = v_circuit + v_mask
+                        MCL.Fr val_total_b = FrAdd(val_b, val_mask_b);
+                        MCL.Fr val_total_c = FrAdd(val_c, val_mask_c);
+
+                        // 4. Prover generates Proofs for the TOTAL polynomial
+                        //    P_total = P_input + P_mask
+                        MCL.Fr[] totalValues = FrVecAdd(inputValues, maskValues);
+                        
+                        MCL.G1[] proof_b = pcs.Open(totalValues, b);
+                        MCL.G1[] proof_c = pcs.Open(totalValues, c);
+                        
+                        // 5. Verifier checks proofs against ZK Commitment
+                        //    Verify(C_zk, r, v_total, proof)
+                        bool verify_b = pcs.Verify(zkCommitment, b, val_total_b, proof_b);
+                        bool verify_c = pcs.Verify(zkCommitment, c, val_total_c, proof_c);
                         
                         if(!verify_b || !verify_c) 
                         {
                             Console.WriteLine("PCS Verification FAILED!");
                             return;
                         }
-                        Console.WriteLine("PCS Verification PASSED! Verifier accepts input values.");
+                        Console.WriteLine("PCS Verification PASSED! Verifier accepts input values (Blindly).");
                         Console.WriteLine("=== End PCS Phase ===\n");
                         // -------------------------------------------------------
                         
