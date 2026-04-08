@@ -802,41 +802,6 @@ namespace test1
             Prover prover = new Prover(layer, gateNum, bitsLen, circuit);
             Verifier verifier = new Verifier();
 
-            // --- Multilinear PCS Phase (Hyrax/Libra Style) WITH ZK MASKING ---
-            Console.WriteLine("\n=== PCS Phase: Multilinear Setup & ZK Commit ===");
-            int numVars = bitsLen[layer - 1]; // Number of variables in input layer
-            var pcs = new MultilinearKZG(numVars);
-            pcs.Setup();
-
-            // Prepare Input Values (as vector for multilinear polynomial)
-            MCL.Fr[] inputValues = new MCL.Fr[gateNum[layer - 1]];
-            for(int i=0; i<inputValues.Length; i++) 
-            {
-                inputValues[i] = circuit[layer - 1][i].value.Value;
-            }
-
-            // 1. Generate Input Commitment (Internal)
-            Console.WriteLine($"Committing to Input Layer (Internal)...");
-            var inputCommitment = pcs.Commit(inputValues);
-
-            // 2. Generate Random Masking Polynomial (Coeffs/Values)
-            MCL.Fr[] maskValues = new MCL.Fr[inputValues.Length];
-            for(int i=0; i<maskValues.Length; i++) {
-                maskValues[i] = prover.pickRandom(); // Using prover's RNG to simulate
-            }
-            Console.WriteLine($"Generated Random Mask Vector Size: {maskValues.Length}");
-
-            // 3. Generate Mask Commitment
-            var maskCommitment = pcs.Commit(maskValues);
-
-            // 4. Calculate ZK Commitment (Input + Mask)
-            // This is the only commitment Verifier will see for the input.
-            var zkCommitment = G1Add(inputCommitment, maskCommitment);
-
-            Console.WriteLine("P: ZK Commitment C_zk = " + zkCommitment.GetStr(10));
-            Console.WriteLine("=== PCS Phase Complete ===\n");
-            // ---------------------------------------------
-
             //建立需要的變數
             MCL.Fr[] fixed_var = new MCL.Fr[bitsLen[0]];
             MCL.Fr random_var;
@@ -898,12 +863,16 @@ namespace test1
                     Console.WriteLine($"V: send s{i} = {s.GetStr(10)}");
                     fixed_var = fixed_var.Append(s).ToArray();
                     claimed = G(s);
-                    Console.WriteLine($"P: claimed G{i}(s{i}) = {claimed.GetStr(10)}");
+                    Console.WriteLine($"P: claimed G{i}(s{i}) = " + claimed.GetStr(10));
 
                     if (now_layer == layer - 2 && i == bitsLen[now_layer + 1] * 2 - 1) //最後一次sumcheck的最後一輪
                     {
-                        Console.WriteLine("V: construct input layer poly");
+                        //Console.WriteLine("V: construct input layer poly");
                         
+                        // claimed_poly = prover.make_q(now_layer, fixed_var);
+                        // 確保最後一輪的 claimed_poly 也被正確發送
+                        claimed_poly = prover.make_q(now_layer, fixed_var);
+                        Console.WriteLine($"P: send claimed_poly q{now_layer + 1}");
                         maskSum = prover.maskSum(now_layer, fixed_var);
                         Console.WriteLine("P: send maskSum with fixed_var = " + maskSum.GetStr(10));
                         
@@ -917,47 +886,26 @@ namespace test1
                         b = fixed_var.Skip(bitsLen[layer - 2]).Take(bitsLen[layer - 1]).ToArray();
                         c = fixed_var.Skip(bitsLen[layer - 2] + bitsLen[layer - 1]).Take(bitsLen[layer - 1]).ToArray();
                         
-                        // --- Multilinear Opening Verification Phase (ZK) ---
-                        Console.WriteLine("\n=== ZK-KZG Verification Phase (Opening) ===");
-                        Console.WriteLine("Verifier needs verification for input values, using ZK commitment.");
-                        
-                        // 1. Prover calculates Multilinear Extension values
-                        //    Result from Circuit logic (GKR result)
-                        MCL.Fr val_b = pcs.EvaluateMLE(inputValues, b);
-                        MCL.Fr val_c = pcs.EvaluateMLE(inputValues, c);
-                        
-                        //    Result from Masking Polynomial (Randomness)
-                        MCL.Fr val_mask_b = pcs.EvaluateMLE(maskValues, b);
-                        MCL.Fr val_mask_c = pcs.EvaluateMLE(maskValues, c);
+                        // --- Multilinear Opening Verification Phase (Public Input) ---
+                        Console.WriteLine("\n=== Verification Phase (Public Input) ===");
+                        Console.WriteLine("Verifier has access to the input layer directly.");
 
-                        // 2. Prover sends Mask Values to Verifier
-                        Console.WriteLine($"P: Claims Mask(b) = {val_mask_b.GetStr(10)}");
-                        Console.WriteLine($"P: Claims Mask(c) = {val_mask_c.GetStr(10)}");
-
-                        // 3. Verifier calculates EXPECTED Total Values
-                        //    v_total = v_circuit + v_mask
-                        MCL.Fr val_total_b = FrAdd(val_b, val_mask_b);
-                        MCL.Fr val_total_c = FrAdd(val_c, val_mask_c);
-
-                        // 4. Prover generates Proofs for the TOTAL polynomial
-                        //    P_total = P_input + P_mask
-                        MCL.Fr[] totalValues = FrVecAdd(inputValues, maskValues);
-                        
-                        MCL.G1[] proof_b = pcs.Open(totalValues, b);
-                        MCL.G1[] proof_c = pcs.Open(totalValues, c);
-                        
-                        // 5. Verifier checks proofs against ZK Commitment
-                        //    Verify(C_zk, r, v_total, proof)
-                        bool verify_b = pcs.Verify(zkCommitment, b, val_total_b, proof_b);
-                        bool verify_c = pcs.Verify(zkCommitment, c, val_total_c, proof_c);
-                        
-                        if(!verify_b || !verify_c) 
+                        // Verifier evaluates the input multilinear polynomial directly 
+                        // at points 'b' and 'c' using the known circuit inputs.
+                        MCL.Fr[] publicInputs = new MCL.Fr[gateNum[layer - 1]];
+                        for(int k = 0; k < publicInputs.Length; k++) 
                         {
-                            Console.WriteLine("PCS Verification FAILED!");
-                            return;
+                            publicInputs[k] = circuit[layer - 1][k].value.Value;
                         }
-                        Console.WriteLine("PCS Verification PASSED! Verifier accepts input values (Blindly).");
-                        Console.WriteLine("=== End PCS Phase ===\n");
+
+                        // Verifier manually computes Multilinear Extension at 'b' and 'c'
+                        // using the evaluate logic (simulated by borrowing prover's method for simplicity, 
+                        // but conceptually Verifier does this locally).
+                        MCL.Fr val_b = prover.make_V(layer - 1)(b); // make_V directly returns sum over inputs
+                        MCL.Fr val_c = prover.make_V(layer - 1)(c);
+                        
+                        Console.WriteLine($"V: Computed Input V(b) = {val_b.GetStr(10)}");
+                        Console.WriteLine($"V: Computed Input V(c) = {val_c.GetStr(10)}");
                         // -------------------------------------------------------
                         
                         var final_addPolyVal = AddPoly(layer - 2, circuit)(a, b, c);
@@ -1006,10 +954,12 @@ namespace test1
 
                         if (!claimed.Equals(term)) { Console.WriteLine("V: final check failed"); return; }
                         Console.WriteLine(" sum check passed ");
+                        
                         random_var = verifier.pickRandom();
                         Console.WriteLine($"V: send r{now_layer + 1} = " + random_var.GetStr(10));
                         claimed = claimed_poly(random_var);
                         Console.WriteLine($"P: claimed q{now_layer + 1}(r{now_layer + 1}) = " + claimed.GetStr(10));
+                        
                         l_poly = prover.make_l(now_layer, fixed_var);
                         Array.Resize(ref fixed_var, bitsLen[now_layer + 1]);
                         for (int j = 0; j < fixed_var.Length; j++)
