@@ -40,26 +40,6 @@ namespace test1
             return res;
         }
 
-        // Helper for G1 addition (For ZK Commitment)
-        private static MCL.G1 G1Add(MCL.G1 a, MCL.G1 b)
-        {
-            var res = new MCL.G1();
-            MCL.Add(ref res, in a, in b);
-            return res;
-        }
-
-        // Helper to add two Fr vectors (Polynomial Addition)
-        private static MCL.Fr[] FrVecAdd(MCL.Fr[] vecA, MCL.Fr[] vecB)
-        {
-            if (vecA.Length != vecB.Length) throw new ArgumentException("Vector lengths mismatch");
-            MCL.Fr[] res = new MCL.Fr[vecA.Length];
-            for (int i = 0; i < vecA.Length; i++)
-            {
-                res[i] = FrAdd(vecA[i], vecB[i]);
-            }
-            return res;
-        }
-
         class MultilinearKZG
         {
             private MCL.G1[][] srsLevels; // srsLevels[k] is the SRS for the sub-cube of size 2^{n-k}
@@ -76,16 +56,16 @@ namespace test1
             public void Setup()
             {
                 Console.WriteLine($"    [KZG] Running Trusted Setup for {numVars} variables...");
-                
+
                 // 1. Generate secrets tau (Trusted Setup Trapdoor)
                 // In a real ceremony, no one knows these. Here we generate them.
                 var taus = new MCL.Fr[numVars];
                 tauG2 = new MCL.G2[numVars];
-                
+
                 g2Base = new MCL.G2();
                 MCL.G2setDst("test_g2"); // Domain separation
                 g2Base.HashAndMapTo(Encoding.UTF8.GetBytes("GEN_G2"));
-                
+
                 g1Base = new MCL.G1();
                 MCL.G1setDst("test_g1");
                 g1Base.HashAndMapTo(Encoding.UTF8.GetBytes("GEN_G1"));
@@ -117,12 +97,12 @@ namespace test1
                     // corresponds to original variables x_{level} ... x_{n-1}
                     // The basis index 'i' (bits) determines the term:
                     // Term = product_{j=0}^{rem-1} [ (1-bit_j)(1-tau_{level+j}) + bit_j(tau_{level+j}) ]
-                    
+
                     for (int i = 0; i < size; i++)
                     {
                         var coeff = ToFr(1);
                         int[] bits = IntToBinary(i, remainingVars);
-                        
+
                         for (int j = 0; j < remainingVars; j++)
                         {
                             var t = taus[level + j]; // Map local var j to global var (level+j)
@@ -130,7 +110,7 @@ namespace test1
                             var term = (bits[j] == 1) ? t : FrSub(ToFr(1), t);
                             coeff = FrMul(coeff, term);
                         }
-                        
+
                         var pt = new MCL.G1();
                         MCL.Mul(ref pt, in g1Base, in coeff);
                         srsLevels[level][i] = pt;
@@ -141,35 +121,35 @@ namespace test1
             public MCL.G1 Commit(MCL.Fr[] values)
             {
                 if (values.Length > srsLevels[0].Length) throw new ArgumentException("Input too large for SRS");
-                
+
                 var c = new MCL.G1();
                 c.Clear();
-                
+
                 // MSM with the top-level SRS
                 // Note: In a real library, use an optimized MSM algorithm (Pippenger).
                 // Here we simply simulate linear combination.
                 MCL.MulVec(ref c, srsLevels[0], values);
-                
+
                 return c;
             }
 
             // Standard Multilinear Evaluation (Simulated for Prover)
-            public MCL.Fr EvaluateMLE(MCL.Fr[] values, MCL.Fr[] r)
+            public static MCL.Fr EvaluateMLE(MCL.Fr[] values, MCL.Fr[] r)
             {
                 MCL.Fr[] currentLayer = (MCL.Fr[])values.Clone();
                 int layerLen = currentLayer.Length;
                 var one = ToFr(1);
 
-                for(int i=0; i<r.Length; i++)
+                for (int i = 0; i < r.Length; i++)
                 {
                     layerLen /= 2;
                     MCL.Fr[] nextLayer = new MCL.Fr[layerLen];
                     var ri = r[i];
 
-                    for(int j=0; j<layerLen; j++)
+                    for (int j = 0; j < layerLen; j++)
                     {
-                        var left = currentLayer[2*j];
-                        var right = currentLayer[2*j+1];
+                        var left = currentLayer[2 * j];
+                        var right = currentLayer[2 * j + 1];
                         var term1 = FrMul(FrSub(one, ri), left);
                         var term2 = FrMul(ri, right);
                         nextLayer[j] = FrAdd(term1, term2);
@@ -193,7 +173,7 @@ namespace test1
                 // We want to prove evaluation at r_i.
                 // The "quotient" for the linear check is q = R - L.
                 // We commit to q using the SRS for the NEXT level (variables x_{i+1}...).
-                
+
                 for (int i = 0; i < numVars; i++)
                 {
                     int nextLen = currentValues.Length / 2;
@@ -201,14 +181,14 @@ namespace test1
                     var rights = new MCL.Fr[nextLen];
                     var quotients = new MCL.Fr[nextLen];
                     var nextValues = new MCL.Fr[nextLen];
-                    
+
                     var ri = r[i];
 
                     for (int j = 0; j < nextLen; j++)
                     {
                         lefts[j] = currentValues[2 * j];
                         rights[j] = currentValues[2 * j + 1];
-                        
+
                         // Quotient polynomial for this step is just the difference (R - L)
                         // effectively Q(x_{>i}) = R(x_{>i}) - L(x_{>i})
                         quotients[j] = FrSub(rights[j], lefts[j]);
@@ -233,17 +213,17 @@ namespace test1
             public bool Verify(MCL.G1 commitment, MCL.Fr[] point, MCL.Fr value, MCL.G1[] proofs)
             {
                 Console.WriteLine($"    [KZG] Verifying Opening via Bilinear Pairing...");
-                
+
                 // Pairing Check Equation:
                 // e(C - v*G, [1]_2) = Product_{i=0}^{k-1} e(pi_i, [tau_i]_2 - [r_i]_2)
-                
+
                 // 1. Calculate LHS: e(C - v*G, [1]_2)
                 var vG = new MCL.G1();
                 MCL.Mul(ref vG, in g1Base, in value);
-                
+
                 var C_minus_vG = new MCL.G1();
                 MCL.Sub(ref C_minus_vG, in commitment, in vG);
-                
+
                 var lhs = new MCL.GT();
                 MCL.Pairing(ref lhs, in C_minus_vG, in g2Base); // g2Base is [1]_2
 
@@ -255,7 +235,7 @@ namespace test1
                 // we'll set it to result of first pairing and mul others, 
                 // or handle the loop carefully.
                 // Let's assume standard accumulation.
-                
+
                 bool isRhsInit = false;
 
                 for (int i = 0; i < numVars; i++)
@@ -263,7 +243,7 @@ namespace test1
                     // Construct [tau_i - r_i]_2
                     var r_g2 = new MCL.G2();
                     MCL.Mul(ref r_g2, in g2Base, in point[i]);
-                    
+
                     var diff_g2 = new MCL.G2();
                     MCL.Sub(ref diff_g2, in tauG2[i], in r_g2); // [tau]_2 - [r]_2
 
@@ -282,7 +262,7 @@ namespace test1
                         rhs = temp;
                     }
                 }
-                
+
                 if (!isRhsInit) throw new Exception("No variables to verify?");
 
                 // 3. Compare
@@ -443,6 +423,7 @@ namespace test1
             private Func<MCL.Fr[], MCL.Fr[], MCL.Fr[], MCL.Fr>[] funs;
             private Func<MCL.Fr[], MCL.Fr>[] Vs;
             private Func<MCL.Fr[], MCL.Fr>[] maskedPolys;
+            private MCL.Fr[][] maskedPolysValues;
             private int layer;
             private int[] gateNum;
             private int[] bitsLen;
@@ -459,9 +440,15 @@ namespace test1
                 Vs = new Func<MCL.Fr[], MCL.Fr>[layer];
                 funs = new Func<MCL.Fr[], MCL.Fr[], MCL.Fr[], MCL.Fr>[layer - 1];
                 maskedPolys = new Func<MCL.Fr[], MCL.Fr>[layer - 1];
+                maskedPolysValues = new MCL.Fr[layer - 1][];
                 for (int i = 0; i <= layer - 1; i++) Vs[i] = make_V(i);
                 for (int i = 0; i < layer - 1; i++) funs[i] = make_f(i);
-                for (int i = 0; i < layer - 1; i++) maskedPolys[i] = make_H(bitsLen[i] + bitsLen[i + 1] + bitsLen[i + 1]);
+                for (int i = 0; i < layer - 1; i++) maskedPolys[i] = make_H(bitsLen[i] + bitsLen[i + 1] + bitsLen[i + 1], out maskedPolysValues[i]);
+            }
+
+            public MCL.Fr[] GetMaskPolyValues(int layer)
+            {
+                return maskedPolysValues[layer];
             }
 
             public MCL.Fr W(int now_lawer, int index)
@@ -498,13 +485,13 @@ namespace test1
 
                     var addPart = AddPoly(layer, circuit)(a, b, c);
                     var vSum = FrAdd(nextLayerV(b), nextLayerV(c));
-                    
+
                     // s = addPart * vSum
                     var s = FrMul(addPart, vSum);
 
                     var mulPart = MulPoly(layer, circuit)(a, b, c);
                     var vProd = FrMul(nextLayerV(b), nextLayerV(c));
-                    
+
                     // s = s + mulPart * vProd
                     s = FrAdd(s, FrMul(mulPart, vProd));
 
@@ -523,7 +510,7 @@ namespace test1
                     MCL.Fr[] parameter = new MCL.Fr[bitsLen[nowLayer] + bitsLen[nowLayer + 1] + bitsLen[nowLayer + 1]];
                     for (int i = 0; i < fixed_var.Length; i++) parameter[i] = fixed_var[i];
                     parameter[fixed_var.Length] = z;
-                    
+
                     int loopCount = (int)Math.Pow(2, parameter.Length - fixed_var.Length - 1);
                     var one = ToFr(1);
 
@@ -539,7 +526,7 @@ namespace test1
                             parameter.Skip(bitsLen[nowLayer]).Take(bitsLen[nowLayer + 1]).ToArray(),
                             parameter.Skip(bitsLen[nowLayer] + bitsLen[nowLayer + 1]).Take(bitsLen[nowLayer + 1]).ToArray()
                             ));
-                        
+
                         val2 = FrAdd(val2, maskedPolys[nowLayer](parameter));
                     }
                     // s = val1 + rho * val2
@@ -591,9 +578,9 @@ namespace test1
                 var s = ToFr(0);
                 MCL.Fr[] parameter = new MCL.Fr[bitsLen[layer] + bitsLen[layer + 1] + bitsLen[layer + 1]];
                 for (int i = 0; i < fixed_var.Length; i++) parameter[i] = fixed_var[i];
-                
+
                 if (parameter.Length == fixed_var.Length) return maskedPolys[layer](parameter);
-                
+
                 int loopCount = (int)Math.Pow(2, parameter.Length - fixed_var.Length);
                 for (int i = 0; i < loopCount; i++)
                 {
@@ -614,33 +601,19 @@ namespace test1
                 return r;
             }
 
-            public Func<MCL.Fr[], MCL.Fr> make_H(int numVars)
+            public Func<MCL.Fr[], MCL.Fr> make_H(int numVars, out MCL.Fr[] values)
             {
-                var constantTerm = pickRandom();
-                var coeffA = new MCL.Fr[numVars];
-                var coeffB = new MCL.Fr[numVars];
-
-                for (int i = 0; i < numVars; i++)
+                int size = 1 << numVars;
+                values = new MCL.Fr[size];
+                for (int i = 0; i < size; i++)
                 {
-                    coeffA[i] = pickRandom();
-                    coeffB[i] = pickRandom();
+                    values[i] = pickRandom();
                 }
 
+                var capturedValues = values;
                 return (MCL.Fr[] parameter) =>
                 {
-                    var s = constantTerm;
-                    for (int i = 0; i < parameter.Length; i++)
-                    {
-                        // val = parameter[i]^2 * coeffB[i]
-                        var val = FrMul(parameter[i], parameter[i]);
-                        val = FrMul(val, coeffB[i]);
-                        s = FrAdd(s, val);
-
-                        // val = parameter[i] * coeffA[i]
-                        val = FrMul(parameter[i], coeffA[i]);
-                        s = FrAdd(s, val);
-                    }
-                    return s;
+                    return MultilinearKZG.EvaluateMLE(capturedValues, parameter);
                 };
             }
         }
@@ -660,7 +633,7 @@ namespace test1
                 r.SetByCSPRNG();
                 return r;
             }
-            
+
             // NOTE: make_input REMOVED. Verifier must rely on PCS verification.
         }
 
@@ -802,6 +775,26 @@ namespace test1
             Prover prover = new Prover(layer, gateNum, bitsLen, circuit);
             Verifier verifier = new Verifier();
 
+            // --- Multilinear PCS Phase (Hyrax/Libra Style) ---
+            Console.WriteLine("\n=== PCS Phase: Multilinear Setup & Commit ===");
+            int numVars = bitsLen[layer - 1]; // Number of variables in input layer
+            var pcs = new MultilinearKZG(numVars);
+            pcs.Setup();
+
+            // Prepare Input Values (as vector for multilinear polynomial)
+            MCL.Fr[] inputValues = new MCL.Fr[gateNum[layer - 1]];
+            for (int i = 0; i < inputValues.Length; i++)
+            {
+                inputValues[i] = circuit[layer - 1][i].value.Value;
+            }
+
+            // Commit
+            Console.WriteLine($"Committing to Input Layer...");
+            var inputCommitment = pcs.Commit(inputValues);
+            Console.WriteLine("P: Commitment C = " + inputCommitment.GetStr(10));
+            Console.WriteLine("=== PCS Phase Complete ===\n");
+            // ---------------------------------------------
+
             //建立需要的變數
             MCL.Fr[] fixed_var = new MCL.Fr[bitsLen[0]];
             MCL.Fr random_var;
@@ -819,8 +812,8 @@ namespace test1
             {
                 var input = new MCL.Fr[bitsLen[0]];
                 int[] bits = IntToBinary(i, bitsLen[0]);
-                for(int k=0; k<bitsLen[0]; k++) input[k] = ToFr(bits[k]);
-                
+                for (int k = 0; k < bitsLen[0]; k++) input[k] = ToFr(bits[k]);
+
                 Console.Write(claimed_D(input).GetStr(10) + " ");
             }
 
@@ -834,6 +827,16 @@ namespace test1
 
             for (int now_layer = 0; now_layer < layer - 1; now_layer++)
             {
+                // --- Set up KZG for Masking Polynomial g ---
+                int gVars = bitsLen[now_layer] + bitsLen[now_layer + 1] * 2;
+                var gPcs = new MultilinearKZG(gVars);
+                gPcs.Setup();
+                var gValues = prover.GetMaskPolyValues(now_layer);
+                var gCommitment = gPcs.Commit(gValues);
+                Console.WriteLine($"\n=== PCS Phase for Masking Polynomial g (Layer {now_layer}) ===");
+                Console.WriteLine("P: Commitment C_g = " + gCommitment.GetStr(10));
+                // --------------------------------------------
+
                 maskSum = prover.maskSum(now_layer, fixed_var);
                 Console.WriteLine("P: send maskSum = " + maskSum.GetStr(10));
                 rho = verifier.pickRandom();
@@ -841,41 +844,49 @@ namespace test1
 
                 // claimed = claimed + rho * maskSum
                 claimed = FrAdd(claimed, FrMul(rho, maskSum));
-                
+
                 Console.WriteLine(" sum check ");
                 for (int i = 0; i < bitsLen[now_layer + 1] * 2; i++)
                 {
                     var G = prover.make_G(fixed_var, now_layer, rho);
                     Console.WriteLine($"P: send G{i}");
                     Console.WriteLine($"V: Verifying G{i}(0) + G{i}(1) = claimed");
-                    
+
                     // term = G(0) + G(1)
                     term = FrAdd(G(ToFr(0)), G(ToFr(1)));
-                    
-                    if (!term.Equals(claimed)) 
-                    { 
+
+                    if (!term.Equals(claimed))
+                    {
                         Console.WriteLine("V: sum check failed");
                         Console.WriteLine($"Claimed: {claimed.GetStr(10)}, Got: {term.GetStr(10)}");
-                        return; 
+                        return;
                     }
-                    
+
                     MCL.Fr s = verifier.pickRandom();
                     Console.WriteLine($"V: send s{i} = {s.GetStr(10)}");
                     fixed_var = fixed_var.Append(s).ToArray();
                     claimed = G(s);
-                    Console.WriteLine($"P: claimed G{i}(s{i}) = " + claimed.GetStr(10));
+                    Console.WriteLine($"P: claimed G{i}(s{i}) = {claimed.GetStr(10)}");
 
                     if (now_layer == layer - 2 && i == bitsLen[now_layer + 1] * 2 - 1) //最後一次sumcheck的最後一輪
                     {
-                        //Console.WriteLine("V: construct input layer poly");
-                        
-                        // claimed_poly = prover.make_q(now_layer, fixed_var);
-                        // 確保最後一輪的 claimed_poly 也被正確發送
-                        claimed_poly = prover.make_q(now_layer, fixed_var);
-                        Console.WriteLine($"P: send claimed_poly q{now_layer + 1}");
+                        Console.WriteLine("V: construct input layer poly");
+
                         maskSum = prover.maskSum(now_layer, fixed_var);
                         Console.WriteLine("P: send maskSum with fixed_var = " + maskSum.GetStr(10));
-                        
+
+                        // --- KZG Verification for g ---
+                        Console.WriteLine($"V: Verifying g(fixed_var) via KZG for Layer {now_layer}");
+                        var gProof = gPcs.Open(gValues, fixed_var);
+                        bool gVerify = gPcs.Verify(gCommitment, fixed_var, maskSum, gProof);
+                        if (!gVerify)
+                        {
+                            Console.WriteLine("V: g(fixed_var) KZG verification failed!");
+                            return;
+                        }
+                        Console.WriteLine("V: g(fixed_var) KZG verification passed.");
+                        // -------------------------------
+
                         // claimed = claimed - rho * maskSum
                         claimed = FrSub(claimed, FrMul(rho, maskSum));
                         Console.WriteLine("V: claimed - rho * maskSum");
@@ -885,38 +896,43 @@ namespace test1
                         a = fixed_var.Take(bitsLen[layer - 2]).ToArray();
                         b = fixed_var.Skip(bitsLen[layer - 2]).Take(bitsLen[layer - 1]).ToArray();
                         c = fixed_var.Skip(bitsLen[layer - 2] + bitsLen[layer - 1]).Take(bitsLen[layer - 1]).ToArray();
-                        
-                        // --- Multilinear Opening Verification Phase (Public Input) ---
-                        Console.WriteLine("\n=== Verification Phase (Public Input) ===");
-                        Console.WriteLine("Verifier has access to the input layer directly.");
 
-                        // Verifier evaluates the input multilinear polynomial directly 
-                        // at points 'b' and 'c' using the known circuit inputs.
-                        MCL.Fr[] publicInputs = new MCL.Fr[gateNum[layer - 1]];
-                        for(int k = 0; k < publicInputs.Length; k++) 
+                        // --- Multilinear Opening Verification Phase ---
+                        Console.WriteLine("\n=== PCS Verification Phase (Opening) ===");
+                        Console.WriteLine("Verifier needs input values at points b and c (Multilinear Queries).");
+
+                        // 1. Prover calculates the TRUE Multilinear Extension values AND Proofs
+                        MCL.Fr val_b = MultilinearKZG.EvaluateMLE(inputValues, b);
+                        MCL.G1[] proof_b = pcs.Open(inputValues, b);
+
+                        MCL.Fr val_c = MultilinearKZG.EvaluateMLE(inputValues, c);
+                        MCL.G1[] proof_c = pcs.Open(inputValues, c);
+
+                        Console.WriteLine($"P: Claims Input(b) = {val_b.GetStr(10)}");
+                        Console.WriteLine($"P: Claims Input(c) = {val_c.GetStr(10)}");
+
+                        // 2. Verifier checks the KZG pairing proofs
+                        bool verify_b = pcs.Verify(inputCommitment, b, val_b, proof_b);
+                        bool verify_c = pcs.Verify(inputCommitment, c, val_c, proof_c);
+
+                        if (!verify_b || !verify_c)
                         {
-                            publicInputs[k] = circuit[layer - 1][k].value.Value;
+                            Console.WriteLine("PCS Verification FAILED!");
+                            return;
                         }
-
-                        // Verifier manually computes Multilinear Extension at 'b' and 'c'
-                        // using the evaluate logic (simulated by borrowing prover's method for simplicity, 
-                        // but conceptually Verifier does this locally).
-                        MCL.Fr val_b = prover.make_V(layer - 1)(b); // make_V directly returns sum over inputs
-                        MCL.Fr val_c = prover.make_V(layer - 1)(c);
-                        
-                        Console.WriteLine($"V: Computed Input V(b) = {val_b.GetStr(10)}");
-                        Console.WriteLine($"V: Computed Input V(c) = {val_c.GetStr(10)}");
+                        Console.WriteLine("PCS Verification PASSED! Verifier accepts input values.");
+                        Console.WriteLine("=== End PCS Phase ===\n");
                         // -------------------------------------------------------
-                        
+
                         var final_addPolyVal = AddPoly(layer - 2, circuit)(a, b, c);
                         var final_mulPolyVal = MulPoly(layer - 2, circuit)(a, b, c);
-                        
+
                         // part1 = final_addPolyVal * (val_b + val_c)
                         var part1 = FrMul(final_addPolyVal, FrAdd(val_b, val_c));
-                        
+
                         // part2 = final_mulPolyVal * (val_b * val_c)
                         var part2 = FrMul(final_mulPolyVal, FrMul(val_b, val_c));
-                        
+
                         term = FrAdd(part1, part2);
 
                         if (!claimed.Equals(term)) { Console.WriteLine("V: final check failed"); return; }
@@ -930,7 +946,19 @@ namespace test1
                         Console.WriteLine($"P: send claimed_poly q{now_layer + 1}");
                         maskSum = prover.maskSum(now_layer, fixed_var);
                         Console.WriteLine("P: send maskSum with fixed_var = " + maskSum.GetStr(10));
-                        
+
+                        // --- KZG Verification for g ---
+                        Console.WriteLine($"V: Verifying g(fixed_var) via KZG for Layer {now_layer}");
+                        var gProof = gPcs.Open(gValues, fixed_var);
+                        bool gVerify = gPcs.Verify(gCommitment, fixed_var, maskSum, gProof);
+                        if (!gVerify)
+                        {
+                            Console.WriteLine("V: g(fixed_var) KZG verification failed!");
+                            return;
+                        }
+                        Console.WriteLine("V: g(fixed_var) KZG verification passed.");
+                        // -------------------------------
+
                         // claimed = claimed - rho * maskSum
                         claimed = FrSub(claimed, FrMul(rho, maskSum));
                         Console.WriteLine("V: claimed - rho * maskSum");
@@ -940,26 +968,24 @@ namespace test1
                         a = fixed_var.Take(bitsLen[now_layer]).ToArray();
                         b = fixed_var.Skip(bitsLen[now_layer]).Take(bitsLen[now_layer + 1]).ToArray();
                         c = fixed_var.Skip(bitsLen[now_layer] + bitsLen[now_layer + 1]).Take(bitsLen[now_layer + 1]).ToArray();
-                        
+
                         var addPolyVal = AddPoly(now_layer, circuit)(a, b, c);
                         var mulPolyVal = MulPoly(now_layer, circuit)(a, b, c);
-                        
+
                         // part1 = addPolyVal * (claimed_poly(0) + claimed_poly(1))
                         var part1 = FrMul(addPolyVal, FrAdd(claimed_poly(ToFr(0)), claimed_poly(ToFr(1))));
-                        
+
                         // part2 = mulPolyVal * (claimed_poly(0) * claimed_poly(1))
                         var part2 = FrMul(mulPolyVal, FrMul(claimed_poly(ToFr(0)), claimed_poly(ToFr(1))));
-                        
+
                         term = FrAdd(part1, part2);
 
                         if (!claimed.Equals(term)) { Console.WriteLine("V: final check failed"); return; }
                         Console.WriteLine(" sum check passed ");
-                        
                         random_var = verifier.pickRandom();
                         Console.WriteLine($"V: send r{now_layer + 1} = " + random_var.GetStr(10));
                         claimed = claimed_poly(random_var);
                         Console.WriteLine($"P: claimed q{now_layer + 1}(r{now_layer + 1}) = " + claimed.GetStr(10));
-                        
                         l_poly = prover.make_l(now_layer, fixed_var);
                         Array.Resize(ref fixed_var, bitsLen[now_layer + 1]);
                         for (int j = 0; j < fixed_var.Length; j++)
