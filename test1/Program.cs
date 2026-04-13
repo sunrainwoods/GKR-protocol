@@ -789,10 +789,10 @@ namespace test1
             }
 
             // Commit
-            Console.WriteLine($"Committing to Input Layer...");
-            var inputCommitment = pcs.Commit(inputValues);
-            Console.WriteLine("P: Commitment C = " + inputCommitment.GetStr(10));
-            Console.WriteLine("=== PCS Phase Complete ===\n");
+            // Console.WriteLine($"Committing to Input Layer...");
+            // var inputCommitment = pcs.Commit(inputValues);
+            // Console.WriteLine("P: Commitment C = " + inputCommitment.GetStr(10));
+            Console.WriteLine("=== Input Layer Setup Complete ===\n");
             // ---------------------------------------------
 
             //建立需要的變數
@@ -897,31 +897,17 @@ namespace test1
                         b = fixed_var.Skip(bitsLen[layer - 2]).Take(bitsLen[layer - 1]).ToArray();
                         c = fixed_var.Skip(bitsLen[layer - 2] + bitsLen[layer - 1]).Take(bitsLen[layer - 1]).ToArray();
 
-                        // --- Multilinear Opening Verification Phase ---
-                        Console.WriteLine("\n=== PCS Verification Phase (Opening) ===");
-                        Console.WriteLine("Verifier needs input values at points b and c (Multilinear Queries).");
+                        // --- Verifier Direct Calculation Phase ---
+                        Console.WriteLine("\n=== Verifier Direct Calculation Phase ===");
+                        Console.WriteLine("Verifier calculates input values at points b and c directly.");
 
-                        // 1. Prover calculates the TRUE Multilinear Extension values AND Proofs
+                        // Verifier calculates the Multilinear Extension values directly from inputValues
                         MCL.Fr val_b = MultilinearKZG.EvaluateMLE(inputValues, b);
-                        MCL.G1[] proof_b = pcs.Open(inputValues, b);
-
                         MCL.Fr val_c = MultilinearKZG.EvaluateMLE(inputValues, c);
-                        MCL.G1[] proof_c = pcs.Open(inputValues, c);
 
-                        Console.WriteLine($"P: Claims Input(b) = {val_b.GetStr(10)}");
-                        Console.WriteLine($"P: Claims Input(c) = {val_c.GetStr(10)}");
-
-                        // 2. Verifier checks the KZG pairing proofs
-                        bool verify_b = pcs.Verify(inputCommitment, b, val_b, proof_b);
-                        bool verify_c = pcs.Verify(inputCommitment, c, val_c, proof_c);
-
-                        if (!verify_b || !verify_c)
-                        {
-                            Console.WriteLine("PCS Verification FAILED!");
-                            return;
-                        }
-                        Console.WriteLine("PCS Verification PASSED! Verifier accepts input values.");
-                        Console.WriteLine("=== End PCS Phase ===\n");
+                        Console.WriteLine($"V: Calculated Input(b) = {val_b.GetStr(10)}");
+                        Console.WriteLine($"V: Calculated Input(c) = {val_c.GetStr(10)}");
+                        Console.WriteLine("=== End Direct Calculation ===\n");
                         // -------------------------------------------------------
 
                         var final_addPolyVal = AddPoly(layer - 2, circuit)(a, b, c);
