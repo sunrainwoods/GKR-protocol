@@ -134,7 +134,7 @@ namespace mcl {
         [DllImport(dllName)] public static extern int mclBn_FrLagrangeInterpolation(ref Fr z, [In] Fr[] xVec, [In] Fr[] yVec, ulong k);
         [DllImport(dllName)] public static extern int mclBn_G1LagrangeInterpolation(ref G1 z, [In] Fr[] xVec, [In] G1[] yVec, ulong k);
         [DllImport(dllName)] public static extern int mclBn_G2LagrangeInterpolation(ref G2 z, [In] Fr[] xVec, [In] G2[] yVec, ulong k);
-        public static void Init(int curveType = BN254)
+        public static void Init(int curveType = BLS12_381)
         {
             if (!System.Environment.Is64BitProcess) {
                 throw new PlatformNotSupportedException("not 64-bit system");

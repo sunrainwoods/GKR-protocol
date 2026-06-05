@@ -641,7 +641,7 @@ namespace test1
         {
             try
             {
-                MCL.Init(MCL.BN254);
+                MCL.Init(MCL.BLS12_381);
             }
             catch (Exception e)
             {
@@ -649,7 +649,7 @@ namespace test1
                 return;
             }
 
-            Console.WriteLine("MCL Initialized (BN254 Curve). Modulus is fixed.");
+            Console.WriteLine("MCL Initialized (BLS12-381 Curve). Modulus is fixed.");
 
             int layer;
             Node[][] circuit;
